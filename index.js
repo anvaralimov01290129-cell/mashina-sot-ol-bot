@@ -1,7 +1,8 @@
 const { Telegraf, Scenes, session } = require('telegraf');
 const express = require('express');
 
-const BOT_TOKEN = '8998326453:AAEJW-jLx24cG6CfvWqUvjvW0hgjEPbZSNs';
+// Yangi xavfsiz tokeningiz joylashtirildi:
+const BOT_TOKEN = '8998326453:AAH1JROgEtTuSGrFsrs4oZCwQylxULDlXwU';
 const KANAL_ID = '@mashinasotvasotibol'; 
 
 const bot = new Telegraf(BOT_TOKEN);
@@ -9,7 +10,7 @@ const app = express();
 
 app.get('/', (req, res) => res.send('Bot 24/7 ishlamoqda!'));
 
-// Sekin ishlaydigan faylli seans o'rniga tezkor xotiradan foydalanamiz
+// Tezkor xotiradan seanslar uchun foydalanamiz
 bot.use(session());
 
 const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
@@ -51,7 +52,7 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
             await ctx.telegram.sendPhoto(KANAL_ID, photoId, { caption: `🚗 #SOTILADI\n\n🚙 Modeli: ${d.model}\n📅 Yili: ${d.year}\n💰 Narxi: ${d.price}\n📞 Tel: ${d.phone}` });
             ctx.reply('✅ E\'loningiz muvaffaqiyatli kanalga joylashtirildi!');
         } catch (err) {
-            ctx.reply('Xatolik: Bot kanalga e\'lon joylay olmadi. Bot kanalingizda ADMIN ekanligini qayta tekshiring!');
+            ctx.reply('Xatolik: Bot kanalga e\'lon joylay olmadi. Bot kanalingizda ADMIN ekanligini va xabar joylash ruxsati borligini qayta tekshiring!');
         }
         return ctx.scene.leave();
     }
