@@ -3,7 +3,7 @@ const LocalSession = require('telegraf-session-local');
 const express = require('express');
 
 // QUYIDAGI JOYGA O'Z MA'LUMOTLARINGIZNI YOZING:
-const BOT_TOKEN = '8998326453:AAFN6OYcDOe_AU9YIKLAhzRI9GfA-u_t3to';
+const BOT_TOKEN = '8998326453:AAEJW-jLx24cG6CfvWqUvjvW0hgjEPbZSNs';
 const KANAL_ID = '@mashinasotvasotibol'; 
 
 const bot = new Telegraf(BOT_TOKEN);
