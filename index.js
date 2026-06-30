@@ -1,5 +1,4 @@
 const { Telegraf, Scenes, session } = require('telegraf');
-const LocalSession = require('telegraf-session-local');
 const express = require('express');
 
 const BOT_TOKEN = '8998326453:AAEJW-jLx24cG6CfvWqUvjvW0hgjEPbZSNs';
@@ -8,11 +7,10 @@ const KANAL_ID = '@mashinasotvasotibol';
 const bot = new Telegraf(BOT_TOKEN);
 const app = express();
 
-// Render serverini uyg'oq ushlash uchun majburiy yo'lak
-app.get('/', (req, res) => res.send('Bot muvaffaqiyatli ishlamoqda!'));
+app.get('/', (req, res) => res.send('Bot 24/7 ishlamoqda!'));
 
-// Loyihani sessiyalar bilan ta'minlash
-bot.use((new LocalSession({ database: 'session_db.json' })).middleware());
+// Sekin ishlaydigan faylli seans o'rniga tezkor xotiradan foydalanamiz
+bot.use(session());
 
 const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
     (ctx) => { 
@@ -65,7 +63,6 @@ bot.use(stage.middleware());
 bot.command('elon', (ctx) => ctx.scene.enter('CAR_AD_WIZARD'));
 bot.start((ctx) => ctx.reply('Salom! E\'lon berish uchun /elon buyrug\'ini bosing.'));
 
-// Portni ishga tushirish va botni parallel yuklash
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
@@ -74,7 +71,5 @@ app.listen(PORT, () => {
         .catch((err) => console.error('Bot launch error:', err));
 });
 
-// Server xavfsiz o'chishi uchun
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-
