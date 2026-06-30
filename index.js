@@ -2,16 +2,16 @@ const { Telegraf, Scenes, session } = require('telegraf');
 const LocalSession = require('telegraf-session-local');
 const express = require('express');
 
-// Tokeningiz va Kanal ID-ngiz joylashtirildi:
 const BOT_TOKEN = '8998326453:AAEJW-jLx24cG6CfvWqUvjvW0hgjEPbZSNs';
 const KANAL_ID = '@mashinasotvasotibol'; 
 
 const bot = new Telegraf(BOT_TOKEN);
 const app = express();
 
-app.get('/', (req, res) => res.send('Bot 24/7 ishlamoqda!'));
-app.listen(process.env.PORT || 3000);
+// Render serverini uyg'oq ushlash uchun majburiy yo'lak
+app.get('/', (req, res) => res.send('Bot muvaffaqiyatli ishlamoqda!'));
 
+// Loyihani sessiyalar bilan ta'minlash
 bot.use((new LocalSession({ database: 'session_db.json' })).middleware());
 
 const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
@@ -49,15 +49,32 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
         if (!ctx.message || !ctx.message.photo) return ctx.reply('Iltimos, mashina rasmini yuboring:');
         const photoId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
         const d = ctx.wizard.state.data;
-        await ctx.telegram.sendPhoto(KANAL_ID, photoId, { caption: `🚗 #SOTILADI\n\n🚙 Modeli: ${d.model}\n📅 Yili: ${d.year}\n💰 Narxi: ${d.price}\n📞 Tel: ${d.phone}\n\n🤖 @${ctx.botInfo.username} orqali joylandi.` });
-        ctx.reply('✅ E\'loningiz muvaffaqiyatli kanalga joylashtirildi!');
+        try {
+            await ctx.telegram.sendPhoto(KANAL_ID, photoId, { caption: `🚗 #SOTILADI\n\n🚙 Modeli: ${d.model}\n📅 Yili: ${d.year}\n💰 Narxi: ${d.price}\n📞 Tel: ${d.phone}` });
+            ctx.reply('✅ E\'loningiz muvaffaqiyatli kanalga joylashtirildi!');
+        } catch (err) {
+            ctx.reply('Xatolik: Bot kanalga e\'lon joylay olmadi. Bot kanalingizda ADMIN ekanligini qayta tekshiring!');
+        }
         return ctx.scene.leave();
     }
 );
 
 const stage = new Scenes.Stage([carAdWizard]);
 bot.use(stage.middleware());
+
 bot.command('elon', (ctx) => ctx.scene.enter('CAR_AD_WIZARD'));
 bot.start((ctx) => ctx.reply('Salom! E\'lon berish uchun /elon buyrug\'ini bosing.'));
-bot.launch();
-                  
+
+// Portni ishga tushirish va botni parallel yuklash
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    bot.launch()
+        .then(() => console.log('Bot is live!'))
+        .catch((err) => console.error('Bot launch error:', err));
+});
+
+// Server xavfsiz o'chishi uchun
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
+
