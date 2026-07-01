@@ -40,12 +40,24 @@ async function getRealAvtoelonPrice(model, year) {
             .replace(/\s+/g, '-')
             .replace(/[^a-z0-9-]/g, '');
 
-        if (queryModel.includes('nexia-3')) queryModel = 'chevrolet/nexia';
-        else if (queryModel.includes('gentra')) queryModel = 'chevrolet/gentra';
-        else if (queryModel.includes('cobalt')) queryModel = 'chevrolet/cobalt';
-        else if (queryModel.includes('spark')) queryModel = 'chevrolet/spark';
-        else if (queryModel.includes('matiz')) queryModel = 'daewoo/matiz';
-        else if (!queryModel.includes('/')) queryModel = 'chevrolet/' + queryModel;
+        // Nexia turlarini to'g'ri ajratish va Avtoelon.uz URL manziliga moslash
+        if (queryModel.includes('nexia-3') || queryModel.includes('nexia3')) {
+            queryModel = 'chevrolet/nexia-3';
+        } else if (queryModel.includes('nexia-1') || queryModel.includes('nexia1') || (queryModel.includes('nexia') && !queryModel.includes('3') && !queryModel.includes('2'))) {
+            queryModel = 'daewoo/nexia';
+        } else if (queryModel.includes('nexia-2') || queryModel.includes('nexia2')) {
+            queryModel = 'daewoo/nexia';
+        } else if (queryModel.includes('gentra')) {
+            queryModel = 'chevrolet/gentra';
+        } else if (queryModel.includes('cobalt')) {
+            queryModel = 'chevrolet/cobalt';
+        } else if (queryModel.includes('spark')) {
+            queryModel = 'chevrolet/spark';
+        } else if (queryModel.includes('matiz')) {
+            queryModel = 'daewoo/matiz';
+        } else if (!queryModel.includes('/')) {
+            queryModel = 'chevrolet/' + queryModel;
+        }
 
         const url = `https://avtoelon.uz/uz/avto/${queryModel}/year-${year}/`;
         
@@ -85,7 +97,7 @@ function calculateBackupPrice(model, year, condition) {
     else if (m.includes('nexia 3')) price = 10500;
     else if (m.includes('spark')) price = 8000;
     else if (m.includes('nexia 2')) price = 5500;
-    else if (m.includes('nexia 1')) price = 4200; 
+    else if (m.includes('nexia 1') || m.includes('nexia')) price = 4200; 
     else if (m.includes('matiz')) price = 3500;
     else if (m.includes('damas')) price = 7000;
     else price = 6000;
@@ -94,7 +106,7 @@ function calculateBackupPrice(model, year, condition) {
     const diff = currentYear - yr;
 
     if (diff > 0) {
-        if (m.includes('nexia 1') || m.includes('matiz') || yr < 2010) {
+        if (m.includes('nexia 1') || m.includes('nexia') || m.includes('matiz') || yr < 2010) {
             price -= (diff * 130);
         } else {
             price -= (diff * 350);
@@ -102,12 +114,12 @@ function calculateBackupPrice(model, year, condition) {
     }
 
     if (condition === 'yorilgan_urilgan') {
-        price -= (m.includes('nexia 1') || m.includes('matiz')) ? 500 : 1300;
+        price -= (m.includes('nexia 1') || m.includes('nexia') || m.includes('matiz')) ? 500 : 1300;
     } else if (condition === 'kraska_bor') {
-        price -= (m.includes('nexia 1') || m.includes('matiz')) ? 250 : 450;
+        price -= (m.includes('nexia 1') || m.includes('nexia') || m.includes('matiz')) ? 250 : 450;
     }
 
-    if (m.includes('nexia 1')) {
+    if (m.includes('nexia 1') || m.includes('nexia')) {
         if (price < 1100) price = 1100; 
         if (price > 2300 && yr < 2000) price = 1350; 
     } else if (m.includes('matiz')) {
@@ -162,7 +174,7 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
         });
         return ctx.wizard.next();
     },
-    // 5. Avtoelon tahlilini ko'rsatish va SOTUVChINING O'ZIDAN NARX SO'RASh (YANGI BOSQICh)
+    // 5. Avtoelon tahlilini ko'rsatish va Sotuvchidan o'z narxini so'rash
     async (ctx) => {
         if (!ctx.callbackQuery) return ctx.reply('Iltimos, yuqoridagi tugmalardan birini tanlang:');
         await ctx.answerCbQuery();
@@ -191,15 +203,14 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
             realPrice -= Math.floor(km / 50000) * 150;
         }
 
-        if (d.model.toLowerCase().includes('nexia 1') && parseInt(d.year) < 2000 && realPrice > 2000) {
+        // Agar onlayn tizim eski Nexia 1 uchun baribir qimmat narx qaytarsa, uni jilovlaymiz
+        if ((d.model.toLowerCase().includes('nexia 1') || d.model.toLowerCase() === 'nexia') && parseInt(d.year) < 2000 && realPrice > 2000) {
             realPrice = calculateBackupPrice(d.model, d.year, d.condition_val);
         }
 
-        // Tavsiyaviy narxni eslab qolamiz
         ctx.wizard.state.data.suggested_price = realPrice;
 
-        // Foydalanuvchidan o'z narxini so'raymiz
-        await ctx.reply(`📊 Avtoelon.uz tahliliga ko'ra, moshinangizning o'rtacha bozor narxi: **${realPrice} $**\n\n💰 Siz moshinangizni necha pulga sotmoqchisiz?\n(Faqat raqam kiriting, masalan: 1300 yoki 12500)`);
+        await ctx.reply(`📊 Avtoelon.uz tahliliga ko'ra, moshinangizning o'rtacha bozor narxi: **${realPrice} $**\n\n💰 Siz moshinangizni necha pulga sotmoqchisiz?\n(Faqat raqam kiriting, masalan: 1350 yoki 12500)`);
         return ctx.wizard.next();
     },
     // 6. Sotuvchi kiritgan narxni qabul qilish va Tel raqam so'rash
@@ -207,7 +218,7 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
         if (!ctx.message || !ctx.message.text || isNaN(ctx.message.text)) {
             return ctx.reply('Iltimos, narxni faqat raqamlarda kiriting (Masalan: 4500):');
         }
-        ctx.wizard.state.data.price = ctx.message.text; // Sotuvchi qo'ygan narx yozildi
+        ctx.wizard.state.data.price = ctx.message.text; 
 
         ctx.reply('📞 Telefon raqamingizni yuboring:', { 
             reply_markup: { keyboard: [[{ text: "📱 Raqamni yuborish", request_contact: true }]], one_time_keyboard: true, resize_keyboard: true } 
@@ -257,4 +268,4 @@ app.listen(PORT, '0.0.0.0', () => {
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-        
+    
