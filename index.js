@@ -10,7 +10,6 @@ const KANAL_ID = '@mashinasotvasotibol';
 const bot = new Telegraf(BOT_TOKEN);
 const app = express();
 
-// Render crash bo'lmasligi uchun xotirada (RAM) saqlash tizimi
 let userStates = {};
 let globalAds = [];
 let adCounter = 1000; 
@@ -25,7 +24,7 @@ function clearUserState(userId) {
     delete userStates[userId];
 }
 
-// Kanalga a'zolikni tekshirish funksiyasi (@mashinasotvasotibol uchun)
+// Kanalga a'zolikni tekshirish funksiyasi
 async function checkSubscription(ctx, userId) {
     try {
         const member = await ctx.telegram.getChatMember(KANAL_ID, userId);
@@ -37,22 +36,23 @@ async function checkSubscription(ctx, userId) {
     }
 }
 
+// Tuzatilgan va soddalashtirilgan narx tekshirish funksiyasi
 async function getRealAvtoelonPrice(model, year) {
     try {
-        let queryModel = model.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-        let isUzAuto = false;
+        let mName = model.toLowerCase().trim();
+        let queryModel = '';
 
-        if (queryModel.includes('nexia-3') || queryModel.includes('nexia3')) { queryModel = 'chevrolet/nexia-3'; isUzAuto = true; }
-        else if (queryModel.includes('nexia-1') || queryModel.includes('nexia1') || (queryModel.includes('nexia') && !queryModel.includes('3') && !queryModel.includes('2'))) { queryModel = 'daewoo/nexia'; isUzAuto = true; }
-        else if (queryModel.includes('nexia-2') || queryModel.includes('nexia2')) { queryModel = 'daewoo/nexia'; isUzAuto = true; }
-        else if (queryModel.includes('gentra')) { queryModel = 'chevrolet/gentra'; isUzAuto = true; }
-        else if (queryModel.includes('cobalt')) { queryModel = 'chevrolet/cobalt'; isUzAuto = true; }
-        else if (queryModel.includes('spark')) { queryModel = 'chevrolet/spark'; isUzAuto = true; }
-        else if (queryModel.includes('matiz')) { queryModel = 'daewoo/matiz'; isUzAuto = true; }
-        else if (queryModel.includes('damas')) { queryModel = 'chevrolet/damas'; isUzAuto = true; }
-        else if (queryModel.includes('lacetti')) { queryModel = 'chevrolet/lacetti'; isUzAuto = true; }
+        if (mName.includes('nexia-3') || mName.includes('nexia3')) queryModel = 'chevrolet/nexia-3';
+        else if (mName.includes('nexia-2') || mName.includes('nexia2')) queryModel = 'daewoo/nexia';
+        else if (mName.includes('nexia-1') || mName.includes('nexia1') || (mName.includes('nexia') && !mName.includes('3') && !mName.includes('2'))) queryModel = 'daewoo/nexia';
+        else if (mName.includes('gentra')) queryModel = 'chevrolet/gentra';
+        else if (mName.includes('cobalt')) queryModel = 'chevrolet/cobalt';
+        else if (mName.includes('spark')) queryModel = 'chevrolet/spark';
+        else if (mName.includes('matiz')) queryModel = 'daewoo/matiz';
+        else if (mName.includes('damas')) queryModel = 'chevrolet/damas';
+        else if (mName.includes('lacetti')) queryModel = 'chevrolet/lacetti';
 
-        if (!isUzAuto) return null;
+        if (!queryModel) return null; // O'zbekiston moshinalari bo'lmasa to'xtaydi
 
         const url = `https://avtoelon.uz/uz/avto/${queryModel}/year-${year}/`;
         const response = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
@@ -65,8 +65,12 @@ async function getRealAvtoelonPrice(model, year) {
             if (priceNum > 2000 && priceNum < 100000) prices.push(priceNum);
         });
 
-        if (prices.length > 0) return Math.round(prices.reduce((a, b) => a + b, 0) / prices.length);
-    } catch (error) { console.error("Avtoelon xatosi:", error.message); }
+        if (prices.length > 0) {
+            return Math.round(prices.reduce((a, b) => a + b, 0) / prices.length);
+        }
+    } catch (error) { 
+        console.error("Avtoelon parsing xatosi:", error.message); 
+    }
     return null; 
 }
 
@@ -182,21 +186,18 @@ bot.on('message', async (ctx, next) => {
 
     if (!state || state.step === 'IDLE') return next();
 
-    // 1-QADAM: Model qabul qilish
     if (state.step === 'WAITING_MODEL') {
         if (!ctx.message.text) return ctx.reply('Iltimos, modelni matnda yozing:');
         setUserState(userId, 'WAITING_YEAR', { model: ctx.message.text });
         return ctx.reply('📅 Ishlab chiqarilgan yilini kiriting:');
     }
 
-    // 2-QADAM: Yil qabul qilish
     if (state.step === 'WAITING_YEAR') {
         if (!ctx.message.text || isNaN(ctx.message.text)) return ctx.reply('Iltimos, yilni faqat raqamda kiriting:');
         setUserState(userId, 'WAITING_MILEAGE', { year: ctx.message.text });
         return ctx.reply('🛣 Mashina qancha masofa yurgan? (KM da, faqat raqam):');
     }
 
-    // 3-QADAM: Yurgan yo'li
     if (state.step === 'WAITING_MILEAGE') {
         if (!ctx.message.text || isNaN(ctx.message.text)) return ctx.reply('Iltimos, masofani faqat raqamda kiriting:');
         setUserState(userId, 'WAITING_CONDITION', { mileage: ctx.message.text });
@@ -211,7 +212,6 @@ bot.on('message', async (ctx, next) => {
         });
     }
 
-    // 4-QADAM: Narx kiritish
     if (state.step === 'WAITING_PRICE') {
         if (!ctx.message.text) return ctx.reply('Iltimos, narxni yozing:');
         setUserState(userId, 'WAITING_PHONE', { price: ctx.message.text });
@@ -220,26 +220,21 @@ bot.on('message', async (ctx, next) => {
         });
     }
 
-    // 5-QADAM: Telefon raqam kiritish
     if (state.step === 'WAITING_PHONE') {
         let phone = ctx.message.contact ? ctx.message.contact.phone_number : ctx.message.text;
-        
-        if (!phone) {
-            return ctx.reply('⚠️ Iltimos, telefon raqamingizni yozing yoki tugmani bosing:');
-        }
+        if (!phone) return ctx.reply('⚠️ Iltimos, telefon raqamingizni yozing yoki tugmani bosing:');
 
         let cleanPhone = phone.toString().replace(/\s+/g, '');
         const phoneRegex = /^(\+?\d{9,13})$/;
 
         if (!phoneRegex.test(cleanPhone)) {
-            return ctx.reply('⚠️ Noto\'g\'ri format. Iltimos, raqamni to\'g\'ri kiriting:\nMasalan: 991234567 yoki +998991234567');
+            return ctx.reply('⚠️ Noto\'g\'ri format. Iltimos, raqamni to\'g\'ri kiriting:\nMasalan: 991234567');
         }
         
         setUserState(userId, 'WAITING_PHOTO', { phone: cleanPhone });
         return ctx.reply('🖼 Endi mashinangizning rasmini yuboring:', { reply_markup: { remove_keyboard: true } });
     }
 
-    // 6-QADAM: Rasm qabul qilish va Kanalga chiqarish
     if (state.step === 'WAITING_PHOTO') {
         if (!ctx.message.photo) return ctx.reply('Iltimos, mashina rasmini fayl emas, rasm shaklida yuboring:');
         const photoId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
@@ -276,7 +271,7 @@ bot.on('message', async (ctx, next) => {
             
             clearUserState(userId);
         } catch (err) {
-            ctx.reply('Xatolik: Bot e\'lonni kanalga chiqara olmadi. Bot kanalda admin ekanligini va ruxsatlari borligini tekshiring.', mainMenu);
+            ctx.reply('Xatolik: Bot e\'lonni kanalga chiqara olmadi. Bot kanalda admin ekanligini tekshiring.', mainMenu);
             clearUserState(userId);
         }
     }
@@ -327,7 +322,7 @@ bot.on('callback_query', async (ctx) => {
             if (realPrice) {
                 await ctx.reply(`📊 O'rtacha bozor narxi: **${realPrice} $**\n\n💰 Siz necha pulga sotmoqchisiz?\n(Masalan: 4500)`);
             } else {
-                await ctx.reply(`✨ Ushbu model uchun avtomatik narx hisoblanmadi.\n\n💰 Moshinangiz narxini kiriting (faqat raqamda):`);
+                await ctx.reply(`✨ Narx avtomatik hisoblanmadi.\n\n💰 Moshinangiz narxini kiriting:`);
             }
             return;
         }
@@ -361,4 +356,4 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
     bot.launch().catch(err => console.error("Bot ishga tushmadi:", err.message));
 });
-                
+    
