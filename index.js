@@ -3,19 +3,17 @@ const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
 
-// MAJBURIY KANAL VA E'LONLAR KANALI BITTADA JAMLANDI
+// MAJBURIY KANAL VA E'LONLAR KANALI
 const BOT_TOKEN = '8998326453:AAH1JROgEtTuSGrFsrs4oZCwQylxULDlXwU';
 const KANAL_ID = '@mashinasotvasotibol'; 
 
 const bot = new Telegraf(BOT_TOKEN);
 const app = express();
 
-// Foydalanuvchilar holati va e'lonlar xotirada saqlanadi
 let userStates = {};
 let globalAds = [];
 let adCounter = 1000; 
 
-// SERVER CRASH BO'lishini OLDINI OLISH (BOT TO'XTAMAYDI)
 process.on('uncaughtException', (err) => {
     console.error('Kutilmagan xatolik (Bot to\'xtamadi):', err.message);
 });
@@ -34,17 +32,29 @@ function clearUserState(userId) {
     delete userStates[userId];
 }
 
-// 100% Aniq ishlaydigan a'zolikni tekshirish funksiyasi
+// 100% Majburiy tekshiruv (Hatto admin/creator bo'lsa ham faqat 'member' maqomiga ruxsat beradi)
 async function checkSubscription(ctx, userId) {
     try {
         const member = await ctx.telegram.getChatMember(KANAL_ID, userId);
-        const allowedStatuses = ['creator', 'administrator', 'member'];
+        // 'creator' va 'administrator' ruxsatlardan olib tashlandi, hamma a'zo bo'lishi shart!
+        const allowedStatuses = ['member'];
         return allowedStatuses.includes(member.status);
     } catch (error) {
-        console.error("Kanal tekshirishda xato (Bot foydalanuvchini bloklaydi):", error.message);
-        // Bot xato bersa ham majburiy kanal oynasini ko'rsatadi, adashib o'tkazib yubormaydi
+        console.error("Kanal tekshirishda xato:", error.message);
         return false; 
     }
+}
+
+// Majburiy kanal oynasi va ostida Tekshirish tugmasi
+async function sendSubscriptionBlock(ctx) {
+    return ctx.reply(`❌ **Kechirasiz!** Botdan foydalanishdan oldin rasmiy kanalimizga a'zo bo'lishingiz kerak.\n\n👉 Kanalimiz: ${KANAL_ID}\n\nA'zo bo'lib pastdagi "✅ Tekshirish" tugmasini bosing.`, {
+        reply_markup: {
+            inline_keyboard: [
+                [{ text: "📢 Kanalga a'zo bo'lish", url: `https://t.me/${KANAL_ID.replace('@', '')}` }],
+                [{ text: "✅ Tekshirish", callback_data: "check_sub" }]
+            ]
+        }
+    });
 }
 
 async function getRealAvtoelonPrice(model, year) {
@@ -79,7 +89,7 @@ async function getRealAvtoelonPrice(model, year) {
             return Math.round(prices.reduce((a, b) => a + b, 0) / prices.length);
         }
     } catch (error) { 
-        console.error("Avtoelon tahlil xatosi:", error.message); 
+        console.error("Avtoelon parsing xatosi:", error.message); 
     }
     return null; 
 }
@@ -107,7 +117,7 @@ function calculateBackupPrice(model, year, condition) {
     return Math.round(price > 1000 ? price : 1100);
 }
 
-app.get('/', (req, res) => res.send('Bot 24/7 Muzaffaqiyatli va Uzluksiz ishlamoqda!'));
+app.get('/', (req, res) => res.send('Bot 24/7 va uzluksiz ishlamoqda!'));
 
 const mainMenu = {
     reply_markup: {
@@ -133,43 +143,27 @@ const regionsKeyboard = {
 
 bot.start(async (ctx) => {
     clearUserState(ctx.from.id);
-    
     const isSubscribed = await checkSubscription(ctx, ctx.from.id);
     if (!isSubscribed) {
-        return ctx.reply(`❌ **Kechirasiz!** Botdan foydalanishdan oldin rasmiy kanalimizga a'zo bo'lishingiz kerak.\n\n👉 Kanalimiz: ${KANAL_ID}\n\nA'zo bo'lgach, qaytadan /start buyrug'ini bosing.`, {
-            reply_markup: {
-                inline_keyboard: [[{ text: "📢 Kanalga a'zo bo'lish", url: `https://t.me/${KANAL_ID.replace('@', '')}` }]]
-            }
-        });
+        return sendSubscriptionBlock(ctx);
     }
-
     return ctx.reply('Salom! Moshina bozor botimizga xush kelibsiz. Quyidagi menudan foydalaning:', mainMenu);
 });
 
 bot.hears("🚗 E'lon berish", async (ctx) => {
     const isSubscribed = await checkSubscription(ctx, ctx.from.id);
     if (!isSubscribed) {
-        return ctx.reply(`❌ Botdan foydalanish uchun avval kanalimizga a'zo bo'ling:\n\n👉 ${KANAL_ID}`, {
-            reply_markup: {
-                inline_keyboard: [[{ text: "📢 Kanalga a'zo bo'lish", url: `https://t.me/${KANAL_ID.replace('@', '')}` }]]
-            }
-        });
+        return sendSubscriptionBlock(ctx);
     }
-
     setUserState(ctx.from.id, 'WAITING_MODEL', {});
     return ctx.reply('🚗 Mashina markasi va modelini kiriting:\n(Masalan: Cobalt, Kia K5, Nexia 3)', { reply_markup: { remove_keyboard: true } });
 });
 
 bot.hears("📦 Mening e'lonlarim", async (ctx) => {
     clearUserState(ctx.from.id);
-    
     const isSubscribed = await checkSubscription(ctx, ctx.from.id);
     if (!isSubscribed) {
-        return ctx.reply(`❌ Botdan foydalanish uchun avval kanalimizga a'zo bo'ling:\n\n👉 ${KANAL_ID}`, {
-            reply_markup: {
-                inline_keyboard: [[{ text: "📢 Kanalga a'zo bo'lish", url: `https://t.me/${KANAL_ID.replace('@', '')}` }]]
-            }
-        });
+        return sendSubscriptionBlock(ctx);
     }
 
     const ads = globalAds.filter(a => a.userId === ctx.from.id);
@@ -196,6 +190,13 @@ bot.on('message', async (ctx, next) => {
         const state = userStates[userId];
 
         if (!state || state.step === 'IDLE') return next();
+
+        // Har qanday xabar yuborilganda ham a'zolik tekshiriladi
+        const isSubscribed = await checkSubscription(ctx, userId);
+        if (!isSubscribed) {
+            clearUserState(userId);
+            return sendSubscriptionBlock(ctx);
+        }
 
         if (state.step === 'WAITING_MODEL') {
             if (!ctx.message.text) return ctx.reply('Iltimos, modelni matnda yozing:');
@@ -282,12 +283,12 @@ bot.on('message', async (ctx, next) => {
                 
                 clearUserState(userId);
             } catch (err) {
-                ctx.reply('⚠️ Xatolik: Bot e\'lonni kanalga chiqara olmadi. Bot kanalda admin ekanligini hamda "Post Messages" ruxsati borligini tekshiring.', mainMenu);
+                ctx.reply('⚠️ Xatolik: Bot e\'lonni kanalga chiqara olmadi. Bot kanalda admin ekanligini tekshiring.', mainMenu);
                 clearUserState(userId);
             }
         }
     } catch (e) {
-        console.error("Xabar qayta ishlashda xato:", e.message);
+        console.error("Xabar tahlilida xato:", e.message);
     }
 });
 
@@ -295,6 +296,19 @@ bot.on('callback_query', async (ctx) => {
     try {
         const data = ctx.callbackQuery.data;
         const userId = ctx.from.id;
+
+        // TEKSHIRISH TUGMASI BOSILGANDA
+        if (data === "check_sub") {
+            const isSubscribed = await checkSubscription(ctx, userId);
+            if (isSubscribed) {
+                await ctx.answerCbQuery("✅ Rahmat! Kanalga a'zo bo'ldingiz.");
+                await ctx.deleteMessage().catch(() => {});
+                return ctx.reply("Xush kelibsiz! Endi botdan to'liq foydalanishingiz mumkin:", mainMenu);
+            } else {
+                return ctx.answerCbQuery("❌ Siz hali kanalga a'zo bo'lmagansiz!", { show_alert: true });
+            }
+        }
+
         await ctx.answerCbQuery();
 
         if (data.startsWith('cond_')) {
@@ -370,3 +384,4 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
     bot.launch().catch(err => console.error("Bot ishga tushmadi:", err.message));
 });
+        
