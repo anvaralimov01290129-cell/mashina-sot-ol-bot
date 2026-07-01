@@ -13,6 +13,7 @@ const bot = new Telegraf(BOT_TOKEN);
 const app = express();
 
 const COUNTER_FILE = path.join(__dirname, 'counter.json');
+const ADS_FILE = path.join(__dirname, 'ads.json');
 
 // Avto-inkrement (E'lon raqami) hisoblagichi
 function getNextOrderNumber() {
@@ -31,6 +32,37 @@ function getNextOrderNumber() {
     } catch (err) {
         return Math.floor(Math.random() * 1000);
     }
+}
+
+// E'lonlarni saqlash va o'qish funksiyalari
+function readAds() {
+    try {
+        if (fs.existsSync(ADS_FILE)) {
+            return JSON.parse(fs.readFileSync(ADS_FILE, 'utf8'));
+        }
+    } catch (e) { console.error(e); }
+    return [];
+}
+
+function saveAd(ad) {
+    const ads = readAds();
+    ads.push(ad);
+    fs.writeFileSync(ADS_FILE, JSON.stringify(ads, null, 2), 'utf8');
+}
+
+function updateAdStatus(elonNo, status) {
+    let ads = readAds();
+    const index = ads.findIndex(a => a.elonNo == elonNo);
+    if (index !== -1) {
+        if (status === 'deleted') {
+            ads.splice(index, 1);
+        } else {
+            ads[index].status = status;
+        }
+        fs.writeFileSync(ADS_FILE, JSON.stringify(ads, null, 2), 'utf8');
+        return true;
+    }
+    return false;
 }
 
 // === AVTOELON.UZ SAYTIDAN REAL VAQTDA ONLAYN NARXNI OLISH TIZIMI ===
@@ -52,7 +84,6 @@ async function getRealAvtoelonPrice(model, year) {
         else if (queryModel.includes('damas')) { queryModel = 'chevrolet/damas'; isUzAuto = true; }
         else if (queryModel.includes('lacetti')) { queryModel = 'chevrolet/lacetti'; isUzAuto = true; }
 
-        // Agar mahalliy moshina bo'lmasa, Avtoelondan qidirib vaqt yo'qotmaymiz (Evro moshinalar uchun)
         if (!isUzAuto) return null;
 
         const url = `https://avtoelon.uz/uz/avto/${queryModel}/year-${year}/`;
@@ -88,7 +119,6 @@ function calculateBackupPrice(model, year, condition) {
     const m = model.toLowerCase();
     const yr = parseInt(year) || 2010;
 
-    // Faqat biz bilgan mahalliy moshinalarga zaxira narx hisoblaydi
     if (m.includes('gentra') || m.includes('lacetti')) price = 13500;
     else if (m.includes('cobalt')) price = 12000;
     else if (m.includes('nexia 3')) price = 10500;
@@ -97,7 +127,7 @@ function calculateBackupPrice(model, year, condition) {
     else if (m.includes('nexia 1') || m.includes('nexia')) price = 4200; 
     else if (m.includes('matiz')) price = 3500;
     else if (m.includes('damas')) price = 7000;
-    else return null; // Evro moshina bo'lsa null qaytaradi
+    else return null;
 
     const currentYear = 2026;
     const diff = currentYear - yr;
@@ -133,6 +163,16 @@ function calculateBackupPrice(model, year, condition) {
 app.get('/', (req, res) => res.send('Bot 24/7 ishlamoqda!'));
 bot.use(session());
 
+// === ASOSIY MENU TUGMALARI ===
+const mainMenu = {
+    reply_markup: {
+        keyboard: [
+            [{ text: "🚗 E'lon berish" }, { text: "🗂 Mening e'lonlarim" }]
+        ],
+        resize_keyboard: true
+    }
+};
+
 // === HUDUDLAR RO'YXATI ===
 const regionsKeyboard = {
     reply_markup: {
@@ -151,49 +191,43 @@ const regionsKeyboard = {
 
 // === E'LON BERISH BOSQIChLARI (WIZARD SCENE) ===
 const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
-    // 1. Model so'rash
     (ctx) => { 
-        ctx.reply('🚗 Mashina markasi va modelini kiriting:\n(Masalan: Cobalt, Kia K5, BYD Song Plus, Mercedes W222)'); 
+        ctx.reply('🚗 Mashina markasi va modelini kiriting:\n(Masalan: Cobalt, Kia K5, Nexia 3)', { reply_markup: { remove_keyboard: true } }); 
         ctx.wizard.state.data = {}; 
         return ctx.wizard.next(); 
     },
-    // 2. Yil so'rash
     (ctx) => { 
-        if (!ctx.message || !ctx.message.text) return ctx.reply('Iltimos, modelni matn ko\'rinishida yozing:');
+        if (!ctx.message || !ctx.message.text) return ctx.reply('Iltimos, modelni yozing:');
         ctx.wizard.state.data.model = ctx.message.text; 
         ctx.reply('📅 Ishlab chiqarilgan yilini kiriting:'); 
         return ctx.wizard.next(); 
     },
-    // 3. Yurganini so'rash
     (ctx) => { 
         if (!ctx.message || !ctx.message.text || isNaN(ctx.message.text)) return ctx.reply('Iltimos, yilni faqat raqamlarda kiriting:');
         ctx.wizard.state.data.year = ctx.message.text; 
         ctx.reply('🛣 Mashina qancha masofa yurgan? (KM da, faqat raqam):'); 
         return ctx.wizard.next(); 
     },
-    // 4. Holati so'rovnomasi
-    (ctx) => {
-        if (!ctx.message || !ctx.message.text || isNaN(ctx.message.text)) return ctx.reply('Iltimos, yurgan masofasini faqat raqamda kiriting:');
+    (ctx) => { 
+        if (!ctx.message || !ctx.message.text || isNaN(ctx.message.text)) return ctx.reply('Iltimos, masofani faqat raqamda kiriting:');
         ctx.wizard.state.data.mileage = ctx.message.text; 
         
         ctx.reply('🛠 Mashina holatini tanlang:', {
             reply_markup: {
                 inline_keyboard: [
-                    [{ text: "✨ Toza (Kraska yo'q, urilmagan)", callback_data: "cond_toza" }],
-                    [{ text: "🎨 Petno/Kraska bor (Urilmagan)", callback_data: "cond_kraska" }],
-                    [{ text: "💥 Urilgan / Yorilgan joyi bor", callback_data: "cond_yorilgan" }]
+                    [{ text: "✨ Toza (Kraska yo'q)", callback_data: "cond_toza" }],
+                    [{ text: "🎨 Petno/Kraska bor", callback_data: "cond_kraska" }],
+                    [{ text: "💥 Urilgan / Yorilgan", callback_data: "cond_yorilgan" }]
                 ]
             }
         });
         return ctx.wizard.next();
     },
-    // 5. Qaysi viloyatdan ekanligini so'rash
     async (ctx) => {
-        if (!ctx.callbackQuery) return ctx.reply('Iltimos, yuqoridagi tugmalardan birini tanlang:');
+        if (!ctx.callbackQuery) return ctx.reply('Iltimos, tugmalardan birini tanlang:');
         await ctx.answerCbQuery();
         
-        let statusText = "";
-        let condValue = "";
+        let statusText = ""; let condValue = "";
         if (ctx.callbackQuery.data === "cond_toza") { statusText = "Toza (Kraska yo'q)"; condValue = "toza"; }
         if (ctx.callbackQuery.data === "cond_kraska") { statusText = "Petno/Kraska bor"; condValue = "kraska_bor"; }
         if (ctx.callbackQuery.data === "cond_yorilgan") { statusText = "Urilgan / Yorilgan joyi bor"; condValue = "yorilgan_urilgan"; }
@@ -204,51 +238,37 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
         await ctx.reply('📍 Qaysi hududdan / viloyatdansiz? Tanlang:', regionsKeyboard);
         return ctx.wizard.next();
     },
-    // 6. Narx tahlili bosqichi (Evro moshinalar uchun moslashtirilgan)
     async (ctx) => {
-        if (!ctx.callbackQuery || !ctx.callbackQuery.data.startsWith('reg_')) {
-            return ctx.reply('Iltimos, hududlardan birini tugma orqali tanlang:');
-        }
+        if (!ctx.callbackQuery || !ctx.callbackQuery.data.startsWith('reg_')) return ctx.reply('Iltimos, hududni tugma orqali tanlang:');
         await ctx.answerCbQuery();
         
-        const selectedRegion = ctx.callbackQuery.data.replace('reg_', '');
-        ctx.wizard.state.data.region = selectedRegion;
-
+        ctx.wizard.state.data.region = ctx.callbackQuery.data.replace('reg_', '');
         const d = ctx.wizard.state.data;
         
-        // Mahalliy moshinalar uchun onlayn tekshirish
         let realPrice = await getRealAvtoelonPrice(d.model, d.year);
-        
         if (!realPrice) {
             realPrice = calculateBackupPrice(d.model, d.year, d.condition_val);
         } else {
             if (d.condition_val === 'yorilgan_urilgan') realPrice -= 1400; 
             else if (d.condition_val === 'kraska_bor') realPrice -= 450;
-            const km = parseInt(d.mileage) || 0;
-            realPrice -= Math.floor(km / 50000) * 150;
+            realPrice -= Math.floor((parseInt(d.mileage) || 0) / 50000) * 150;
         }
 
         if (d.model.toLowerCase().includes('nexia 1') && parseInt(d.year) < 2000 && realPrice > 2000) {
             realPrice = calculateBackupPrice(d.model, d.year, d.condition_val);
         }
 
-        // Agar narx aniqlangan bo'lsa (O'zbek moshinalari uchun)
         if (realPrice) {
             ctx.wizard.state.data.suggested_price = `${realPrice} $`;
-            await ctx.reply(`📊 Avtoelon.uz tahliliga ko'ra, moshinangizning o'rtacha bozor narxi: **${realPrice} $**\n\n💰 Siz moshinangizni necha pulga sotmoqchisiz?\n(Masalan: 1350 yoki 12500)`);
+            await ctx.reply(`📊 O'rtacha bozor narxi: **${realPrice} $**\n\n💰 Siz necha pulga sotmoqchisiz?\n(Masalan: 4500)`);
         } else {
-            // Evro yoki boshqa chet el moshinalari uchun
             ctx.wizard.state.data.suggested_price = "Noaniq (Evro/Xorijiy avto)";
-            await ctx.reply(`✨ Xorijiy/Evro moshinalar uchun avtomatik narx hisoblanmaydi.\n\n💰 Moshinangizni necha pulga sotmoqchisiz? O'zingiz xohlagan narxni kiriting:\n(Masalan: 22000 yoki 35000)`);
+            await ctx.reply(`✨ Xorijiy/Evro moshinalar uchun avtomatik narx hisoblanmaydi.\n\n💰 Moshinangiz narxini kiriting:`);
         }
-        
         return ctx.wizard.next();
     },
-    // 7. Sotuvchi kiritgan narxni qabul qilish va Tel raqam so'rash
     (ctx) => {
-        if (!ctx.message || !ctx.message.text) {
-            return ctx.reply('Iltimos, narxni yozib yuboring:');
-        }
+        if (!ctx.message || !ctx.message.text) return ctx.reply('Iltimos, narxni kiriting:');
         ctx.wizard.state.data.price = ctx.message.text; 
 
         ctx.reply('📞 Telefon raqamingizni yuboring:', { 
@@ -256,15 +276,13 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
         }); 
         return ctx.wizard.next();
     },
-    // 8. Rasm so'rash
     async (ctx) => {
         const phone = ctx.message.contact ? ctx.message.contact.phone_number : (ctx.message ? ctx.message.text : null);
         if (!phone) return ctx.reply('Iltimos, raqamni yuboring:');
         ctx.wizard.state.data.phone = phone;
-        ctx.reply('🖼 Mashina rasmini yuboring:', { reply_markup: { remove_keyboard: true } });
+        ctx.reply('🖼 Mashina rasmini yuboring:');
         return ctx.wizard.next();
     },
-    // 9. Kanalga chiqarish
     async (ctx) => {
         if (!ctx.message || !ctx.message.photo) return ctx.reply('Iltimos, mashina rasmini yuboring:');
         const photoId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
@@ -272,30 +290,104 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
         const elonNo = getNextOrderNumber();
         
         let captionText = `📣 **E'LON №${elonNo}**\n\n🚗 #SOTILADI\n\n🚙 Modeli: ${d.model}\n📅 Yili: ${d.year}-yil\n🛣 Yurgani: ${d.mileage} KM\n🛠 Holati: ${d.condition_text}\n📍 Hudud: #__${d.region.replace(' ', '_')}__\n💰 Narxi: **${d.price} $**\n`;
-        
-        if (d.suggested_price !== "Noaniq (Evro/Xorijiy avto)") {
-            captionText += `📊 Bozor narxi (Tavsiya): ${d.suggested_price}\n`;
-        }
-        
+        if (d.suggested_price !== "Noaniq (Evro/Xorijiy avto)") captionText += `📊 Bozor narxi (Tavsiya): ${d.suggested_price}\n`;
         captionText += `📞 Tel: ${d.phone}`;
         
         try {
-            await ctx.telegram.sendPhoto(KANAL_ID, photoId, { caption: captionText });
-            ctx.reply(`✅ E'loningiz kanalga muvaffaqiyatli joylashtirildi! (E'lon №${elonNo})`);
+            const channelMsg = await ctx.telegram.sendPhoto(KANAL_ID, photoId, { caption: captionText });
+            
+            // E'lonni ma'lumotlar bazasiga saqlaymiz
+            saveAd({
+                userId: ctx.from.id,
+                elonNo: elonNo,
+                model: d.model,
+                price: d.price,
+                photoId: photoId,
+                channelMsgId: channelMsg.message_id,
+                caption: captionText,
+                status: 'active'
+            });
+
+            ctx.reply(`✅ E'loningiz kanalga joylashtirildi! (E'lon №${elonNo})`, mainMenu);
         } catch (err) {
-            ctx.reply('Xatolik: Bot e\'lonni kanalga chiqara olmadi.');
+            ctx.reply('Xatolik: Bot e\'lonni kanalga chiqara olmadi.', mainMenu);
         }
         return ctx.scene.leave();
     }
 );
 
-const stage = new Scenes.Stage([carAdWizard]);
-stage.start(async (ctx) => { await ctx.scene.leave(); return ctx.reply('Salom! E\'lon berish uchun /elon buyrug\'ini bosing.'); });
-stage.command('elon', async (ctx) => { await ctx.scene.leave(); return ctx.scene.enter('CAR_AD_WIZARD'); });
+// === MENING E'LONLARIM FILTRI VA BOSHQARUV TIZIMI ===
+bot.hears('🗂 Mening e\'lonlarim', (ctx) => {
+    const ads = readAds().filter(a => a.userId === ctx.from.id);
+    if (ads.length === 0) {
+        return ctx.reply('🔍 Sizda hozircha hech qanday e\'lon yo\'q.');
+    }
 
+    ctx.reply(`🗂 Sizning jami e'lonlaringiz soni: ${ads.length} ta.\nQuyidagi ro'yxatdan keraklisini tanlang:`);
+
+    ads.forEach(ad => {
+        let statusEmoji = ad.status === 'active' ? '🟢 Faol' : '🔴 Sotilgan';
+        ctx.replyWithPhoto(ad.photoId, {
+            caption: `**E'LON №${ad.elonNo}**\n🚗 Moshina: ${ad.model}\n💰 Narxi: ${ad.price} $\n📌 Holati: ${statusEmoji}`,
+            reply_markup: {
+                inline_keyboard: ad.status === 'active' ? [
+                    [
+                        { text: "💰 Sotildi", callback_data: `sol_${ad.elonNo}` },
+                        { text: "❌ O'chirish", callback_data: `del_${ad.elonNo}` }
+                    ]
+                ] : [[{ text: "❌ O'chirish", callback_data: `del_${ad.elonNo}` }]]
+            }
+        });
+    });
+});
+
+// Inline tugmalar bosilganda (Sotildi yoki O'chirish)
+bot.on('callback_query', async (ctx) => {
+    const data = ctx.callbackQuery.data;
+    await ctx.answerCbQuery();
+
+    if (data.startsWith('sol_')) {
+        const elonNo = data.replace('sol_', '');
+        const ads = readAds();
+        const ad = ads.find(a => a.elonNo == elonNo && a.userId === ctx.from.id);
+
+        if (ad) {
+            updateAdStatus(elonNo, 'sold');
+            try {
+                // Kanalda e'lon matnini yangilaymiz va "SOTILDI" degan xeshteg qo'shamiz
+                await ctx.telegram.editMessageCaption(KANAL_ID, ad.channelMsgId, null, `🔥 **MAShINA SOTILDI!**\n\n🤝 Barakasini bersin!\n\n${ad.caption}\n\n#SOTILDI`);
+                ctx.reply(`🎉 E'lon №${elonNo} "SOTILDI" holatiga o'tkazildi va kanalda yangilandi!`);
+            } catch (e) {
+                ctx.reply(`👍 Botda "Sotildi" deb belgilandi, lekin kanaldagi e'lonni o'zgartirib bo'lmadi.`);
+            }
+        }
+    }
+
+    if (data.startsWith('del_')) {
+        const elonNo = data.replace('del_', '');
+        const ads = readAds();
+        const ad = ads.find(a => a.elonNo == elonNo && a.userId === ctx.from.id);
+
+        if (ad) {
+            updateAdStatus(elonNo, 'deleted');
+            try {
+                // Kanalning o'zidan e'lonni butunlay o'chirib tashlaymiz
+                await ctx.telegram.deleteMessage(KANAL_ID, ad.channelMsgId);
+                ctx.reply(`🗑 E'lon №${elonNo} kanaldan va botdan butunlay o'chirib tashlandi.`);
+            } catch (e) {
+                ctx.reply(`🗑 E'lon botdan o'chirildi, lekin kanaldan o'chirishda xatolik bo'ldi (balki u eski e'londir).`);
+            }
+        }
+    }
+});
+
+const stage = new Scenes.Stage([carAdWizard]);
 bot.use(stage.middleware());
+
+bot.hears('🚗 E\'lon berish', (ctx) => ctx.scene.enter('CAR_AD_WIZARD'));
 bot.command('elon', (ctx) => ctx.scene.enter('CAR_AD_WIZARD'));
-bot.start((ctx) => ctx.reply('Salom! E\'lon berish uchun /elon buyrug\'ini bosing.'));
+
+bot.start((ctx) => ctx.reply('Salom! Moshina bozor botimizga xush kelibsiz. Quyidagi menudan foydalaning:', mainMenu));
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', () => {
@@ -305,4 +397,4 @@ app.listen(PORT, '0.0.0.0', () => {
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-             
+        
