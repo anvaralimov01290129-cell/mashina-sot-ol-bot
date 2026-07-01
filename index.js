@@ -3,7 +3,7 @@ const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
 
-// MAJBURIY KANAL VA E'LONLAR KANALI
+// MAJBURIY KANAL VA E'LONLAR KANALI BITTADA
 const BOT_TOKEN = '8998326453:AAH1JROgEtTuSGrFsrs4oZCwQylxULDlXwU';
 const KANAL_ID = '@mashinasotvasotibol'; 
 
@@ -14,6 +14,7 @@ let userStates = {};
 let globalAds = [];
 let adCounter = 1000; 
 
+// Bot o'chib qolmasligi uchun xatoliklarni ushlab qolish
 process.on('uncaughtException', (err) => {
     console.error('Kutilmagan xatolik (Bot to\'xtamadi):', err.message);
 });
@@ -32,22 +33,22 @@ function clearUserState(userId) {
     delete userStates[userId];
 }
 
-// 100% Majburiy tekshiruv (Hatto admin/creator bo'lsa ham faqat 'member' maqomiga ruxsat beradi)
+// MUKAMMAL TEKSHIRUV: Adminlarni ham, oddiy a'zolarni ham to'g'ri tekshiradi
 async function checkSubscription(ctx, userId) {
     try {
         const member = await ctx.telegram.getChatMember(KANAL_ID, userId);
-        // 'creator' va 'administrator' ruxsatlardan olib tashlandi, hamma a'zo bo'lishi shart!
-        const allowedStatuses = ['member'];
+        // 'creator' (Kanal egasi), 'administrator' (Adminlar) va 'member' (A'zolar) — hammasiga ruxsat!
+        const allowedStatuses = ['creator', 'administrator', 'member'];
         return allowedStatuses.includes(member.status);
     } catch (error) {
-        console.error("Kanal tekshirishda xato:", error.message);
+        console.error("Kanal tekshirishda xato (Foydalanuvchi kanalda yo'q yoki bot admin emas):", error.message);
         return false; 
     }
 }
 
-// Majburiy kanal oynasi va ostida Tekshirish tugmasi
+// Majburiy obuna xabari şabloni
 async function sendSubscriptionBlock(ctx) {
-    return ctx.reply(`❌ **Kechirasiz!** Botdan foydalanishdan oldin rasmiy kanalimizga a'zo bo'lishingiz kerak.\n\n👉 Kanalimiz: ${KANAL_ID}\n\nA'zo bo'lib pastdagi "✅ Tekshirish" tugmasini bosing.`, {
+    return ctx.reply(`❌ **Kechirasiz!** Botdan foydalanishdan oldin rasmiy kanalimizga a'zo bo'lishingiz kerak.\n\n👉 Kanalimiz: ${KANAL_ID}\n\nA'zo bo'lib, pastdagi "✅ Tekshirish" tugmasini bosing.`, {
         reply_markup: {
             inline_keyboard: [
                 [{ text: "📢 Kanalga a'zo bo'lish", url: `https://t.me/${KANAL_ID.replace('@', '')}` }],
@@ -117,7 +118,7 @@ function calculateBackupPrice(model, year, condition) {
     return Math.round(price > 1000 ? price : 1100);
 }
 
-app.get('/', (req, res) => res.send('Bot 24/7 va uzluksiz ishlamoqda!'));
+app.get('/', (req, res) => res.send('Bot 24/7 Muzaffaqiyatli ishlamoqda!'));
 
 const mainMenu = {
     reply_markup: {
@@ -191,7 +192,7 @@ bot.on('message', async (ctx, next) => {
 
         if (!state || state.step === 'IDLE') return next();
 
-        // Har qanday xabar yuborilganda ham a'zolik tekshiriladi
+        // Har qadamda kanaldan chiqib ketmaganini tekshirish
         const isSubscribed = await checkSubscription(ctx, userId);
         if (!isSubscribed) {
             clearUserState(userId);
@@ -288,7 +289,7 @@ bot.on('message', async (ctx, next) => {
             }
         }
     } catch (e) {
-        console.error("Xabar tahlilida xato:", e.message);
+        console.error("Xabarda xato:", e.message);
     }
 });
 
@@ -301,9 +302,9 @@ bot.on('callback_query', async (ctx) => {
         if (data === "check_sub") {
             const isSubscribed = await checkSubscription(ctx, userId);
             if (isSubscribed) {
-                await ctx.answerCbQuery("✅ Rahmat! Kanalga a'zo bo'ldingiz.");
+                await ctx.answerCbQuery("✅ Tabriklaymiz! Kanalga a'zoligingiz tasdiqlandi.");
                 await ctx.deleteMessage().catch(() => {});
-                return ctx.reply("Xush kelibsiz! Endi botdan to'liq foydalanishingiz mumkin:", mainMenu);
+                return ctx.reply("Xush kelibsiz! Quyidagi menudan foydalanishingiz mumkin:", mainMenu);
             } else {
                 return ctx.answerCbQuery("❌ Siz hali kanalga a'zo bo'lmagansiz!", { show_alert: true });
             }
@@ -384,4 +385,4 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
     bot.launch().catch(err => console.error("Bot ishga tushmadi:", err.message));
 });
-        
+          
