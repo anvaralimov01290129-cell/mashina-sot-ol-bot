@@ -40,23 +40,20 @@ async function getRealAvtoelonPrice(model, year) {
             .replace(/\s+/g, '-')
             .replace(/[^a-z0-9-]/g, '');
 
-        if (queryModel.includes('nexia-3') || queryModel.includes('nexia3')) {
-            queryModel = 'chevrolet/nexia-3';
-        } else if (queryModel.includes('nexia-1') || queryModel.includes('nexia1') || (queryModel.includes('nexia') && !queryModel.includes('3') && !queryModel.includes('2'))) {
-            queryModel = 'daewoo/nexia';
-        } else if (queryModel.includes('nexia-2') || queryModel.includes('nexia2')) {
-            queryModel = 'daewoo/nexia';
-        } else if (queryModel.includes('gentra')) {
-            queryModel = 'chevrolet/gentra';
-        } else if (queryModel.includes('cobalt')) {
-            queryModel = 'chevrolet/cobalt';
-        } else if (queryModel.includes('spark')) {
-            queryModel = 'chevrolet/spark';
-        } else if (queryModel.includes('matiz')) {
-            queryModel = 'daewoo/matiz';
-        } else if (!queryModel.includes('/')) {
-            queryModel = 'chevrolet/' + queryModel;
-        }
+        let isUzAuto = false;
+
+        if (queryModel.includes('nexia-3') || queryModel.includes('nexia3')) { queryModel = 'chevrolet/nexia-3'; isUzAuto = true; }
+        else if (queryModel.includes('nexia-1') || queryModel.includes('nexia1') || (queryModel.includes('nexia') && !queryModel.includes('3') && !queryModel.includes('2'))) { queryModel = 'daewoo/nexia'; isUzAuto = true; }
+        else if (queryModel.includes('nexia-2') || queryModel.includes('nexia2')) { queryModel = 'daewoo/nexia'; isUzAuto = true; }
+        else if (queryModel.includes('gentra')) { queryModel = 'chevrolet/gentra'; isUzAuto = true; }
+        else if (queryModel.includes('cobalt')) { queryModel = 'chevrolet/cobalt'; isUzAuto = true; }
+        else if (queryModel.includes('spark')) { queryModel = 'chevrolet/spark'; isUzAuto = true; }
+        else if (queryModel.includes('matiz')) { queryModel = 'daewoo/matiz'; isUzAuto = true; }
+        else if (queryModel.includes('damas')) { queryModel = 'chevrolet/damas'; isUzAuto = true; }
+        else if (queryModel.includes('lacetti')) { queryModel = 'chevrolet/lacetti'; isUzAuto = true; }
+
+        // Agar mahalliy moshina bo'lmasa, Avtoelondan qidirib vaqt yo'qotmaymiz (Evro moshinalar uchun)
+        if (!isUzAuto) return null;
 
         const url = `https://avtoelon.uz/uz/avto/${queryModel}/year-${year}/`;
         
@@ -87,10 +84,11 @@ async function getRealAvtoelonPrice(model, year) {
 
 // === ESKI MOShINALAR UChUN TO'G'RILANGAN ZAXIRA KALKULYATORI ===
 function calculateBackupPrice(model, year, condition) {
-    let price = 11000;
+    let price = 0;
     const m = model.toLowerCase();
     const yr = parseInt(year) || 2010;
 
+    // Faqat biz bilgan mahalliy moshinalarga zaxira narx hisoblaydi
     if (m.includes('gentra') || m.includes('lacetti')) price = 13500;
     else if (m.includes('cobalt')) price = 12000;
     else if (m.includes('nexia 3')) price = 10500;
@@ -99,7 +97,7 @@ function calculateBackupPrice(model, year, condition) {
     else if (m.includes('nexia 1') || m.includes('nexia')) price = 4200; 
     else if (m.includes('matiz')) price = 3500;
     else if (m.includes('damas')) price = 7000;
-    else price = 6000;
+    else return null; // Evro moshina bo'lsa null qaytaradi
 
     const currentYear = 2026;
     const diff = currentYear - yr;
@@ -155,7 +153,7 @@ const regionsKeyboard = {
 const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
     // 1. Model so'rash
     (ctx) => { 
-        ctx.reply('🚗 Mashina modelini kiriting:\n(Masalan: Gentra, Cobalt, Nexia 3)'); 
+        ctx.reply('🚗 Mashina markasi va modelini kiriting:\n(Masalan: Cobalt, Kia K5, BYD Song Plus, Mercedes W222)'); 
         ctx.wizard.state.data = {}; 
         return ctx.wizard.next(); 
     },
@@ -189,7 +187,7 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
         });
         return ctx.wizard.next();
     },
-    // 5. Qaysi viloyatdan ekanligini so'rash (YANGI QO'ShILGAN BOSQICh)
+    // 5. Qaysi viloyatdan ekanligini so'rash
     async (ctx) => {
         if (!ctx.callbackQuery) return ctx.reply('Iltimos, yuqoridagi tugmalardan birini tanlang:');
         await ctx.answerCbQuery();
@@ -203,24 +201,22 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
         ctx.wizard.state.data.condition_text = statusText;
         ctx.wizard.state.data.condition_val = condValue;
 
-        // Viloyatni so'raymiz
         await ctx.reply('📍 Qaysi hududdan / viloyatdansiz? Tanlang:', regionsKeyboard);
         return ctx.wizard.next();
     },
-    // 6. Avtoelon tahlilini ko'rsatish va Sotuvchidan o'z narxini so'rash
+    // 6. Narx tahlili bosqichi (Evro moshinalar uchun moslashtirilgan)
     async (ctx) => {
         if (!ctx.callbackQuery || !ctx.callbackQuery.data.startsWith('reg_')) {
             return ctx.reply('Iltimos, hududlardan birini tugma orqali tanlang:');
         }
         await ctx.answerCbQuery();
         
-        // Tanlangan viloyatni saqlaymiz
         const selectedRegion = ctx.callbackQuery.data.replace('reg_', '');
         ctx.wizard.state.data.region = selectedRegion;
 
-        await ctx.reply('⏳ Avtoelon.uz bazasidan joriy bozor narxi tahlil qilinmoqda...');
-
         const d = ctx.wizard.state.data;
+        
+        // Mahalliy moshinalar uchun onlayn tekshirish
         let realPrice = await getRealAvtoelonPrice(d.model, d.year);
         
         if (!realPrice) {
@@ -228,24 +224,30 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
         } else {
             if (d.condition_val === 'yorilgan_urilgan') realPrice -= 1400; 
             else if (d.condition_val === 'kraska_bor') realPrice -= 450;
-            
             const km = parseInt(d.mileage) || 0;
             realPrice -= Math.floor(km / 50000) * 150;
         }
 
-        if ((d.model.toLowerCase().includes('nexia 1') || d.model.toLowerCase() === 'nexia') && parseInt(d.year) < 2000 && realPrice > 2000) {
+        if (d.model.toLowerCase().includes('nexia 1') && parseInt(d.year) < 2000 && realPrice > 2000) {
             realPrice = calculateBackupPrice(d.model, d.year, d.condition_val);
         }
 
-        ctx.wizard.state.data.suggested_price = realPrice;
-
-        await ctx.reply(`📊 Avtoelon.uz tahliliga ko'ra, moshinangizning o'rtacha bozor narxi: **${realPrice} $**\n\n💰 Siz moshinangizni necha pulga sotmoqchisiz?\n(Faqat raqam kiriting, masalan: 1350 yoki 12500)`);
+        // Agar narx aniqlangan bo'lsa (O'zbek moshinalari uchun)
+        if (realPrice) {
+            ctx.wizard.state.data.suggested_price = `${realPrice} $`;
+            await ctx.reply(`📊 Avtoelon.uz tahliliga ko'ra, moshinangizning o'rtacha bozor narxi: **${realPrice} $**\n\n💰 Siz moshinangizni necha pulga sotmoqchisiz?\n(Masalan: 1350 yoki 12500)`);
+        } else {
+            // Evro yoki boshqa chet el moshinalari uchun
+            ctx.wizard.state.data.suggested_price = "Noaniq (Evro/Xorijiy avto)";
+            await ctx.reply(`✨ Xorijiy/Evro moshinalar uchun avtomatik narx hisoblanmaydi.\n\n💰 Moshinangizni necha pulga sotmoqchisiz? O'zingiz xohlagan narxni kiriting:\n(Masalan: 22000 yoki 35000)`);
+        }
+        
         return ctx.wizard.next();
     },
     // 7. Sotuvchi kiritgan narxni qabul qilish va Tel raqam so'rash
     (ctx) => {
-        if (!ctx.message || !ctx.message.text || isNaN(ctx.message.text)) {
-            return ctx.reply('Iltimos, narxni faqat raqamlarda kiriting (Masalan: 4500):');
+        if (!ctx.message || !ctx.message.text) {
+            return ctx.reply('Iltimos, narxni yozib yuboring:');
         }
         ctx.wizard.state.data.price = ctx.message.text; 
 
@@ -269,11 +271,17 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
         const d = ctx.wizard.state.data;
         const elonNo = getNextOrderNumber();
         
+        let captionText = `📣 **E'LON №${elonNo}**\n\n🚗 #SOTILADI\n\n🚙 Modeli: ${d.model}\n📅 Yili: ${d.year}-yil\n🛣 Yurgani: ${d.mileage} KM\n🛠 Holati: ${d.condition_text}\n📍 Hudud: #__${d.region.replace(' ', '_')}__\n💰 Narxi: **${d.price} $**\n`;
+        
+        if (d.suggested_price !== "Noaniq (Evro/Xorijiy avto)") {
+            captionText += `📊 Bozor narxi (Tavsiya): ${d.suggested_price}\n`;
+        }
+        
+        captionText += `📞 Tel: ${d.phone}`;
+        
         try {
-            await ctx.telegram.sendPhoto(KANAL_ID, photoId, { 
-                caption: `📣 **E'LON №${elonNo}**\n\n🚗 #SOTILADI\n\n🚙 Modeli: ${d.model}\n📅 Yili: ${d.year}-yil\n🛣 Yurgani: ${d.mileage} KM\n🛠 Holati: ${d.condition_text}\n📍 Hudud: #__${d.region.replace(' ', '_')}__\n💰 Narxi: **${d.price} $**\n📊 Bozor narxi (Tavsiya): ${d.suggested_price} $\n📞 Tel: ${d.phone}` 
-            });
-            ctx.reply(`✅ E'loningiz ${d.region} hududi bo'yicha kanalga joylashtirildi! (E'lon №${elonNo})`);
+            await ctx.telegram.sendPhoto(KANAL_ID, photoId, { caption: captionText });
+            ctx.reply(`✅ E'loningiz kanalga muvaffaqiyatli joylashtirildi! (E'lon №${elonNo})`);
         } catch (err) {
             ctx.reply('Xatolik: Bot e\'lonni kanalga chiqara olmadi.');
         }
@@ -297,4 +305,4 @@ app.listen(PORT, '0.0.0.0', () => {
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-    
+             
