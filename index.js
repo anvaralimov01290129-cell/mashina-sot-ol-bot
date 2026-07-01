@@ -24,6 +24,19 @@ function clearUserState(userId) {
     delete userStates[userId];
 }
 
+// Kanalga a'zolikni tekshirish funksiyasi
+async function checkSubscription(ctx, userId) {
+    try {
+        const member = await ctx.telegram.getChatMember(KANAL_ID, userId);
+        const allowedStatuses = ['creator', 'administrator', 'member'];
+        return allowedStatuses.includes(member.status);
+    } catch (error) {
+        console.error("A'zolikni tekshirishda xatolik:", error.message);
+        // Agar bot kanalda admin bo'lmasa yoki xato bo'lsa, hamma o'ta oladigan qilib turamiz
+        return true; 
+    }
+}
+
 async function getRealAvtoelonPrice(model, year) {
     try {
         let queryModel = model.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
@@ -104,18 +117,49 @@ const regionsKeyboard = {
     }
 };
 
-bot.start((ctx) => {
+bot.start(async (ctx) => {
     clearUserState(ctx.from.id);
+    
+    // Start bosganda a'zolikni tekshirish
+    const isSubscribed = await checkSubscription(ctx, ctx.from.id);
+    if (!isSubscribed) {
+        return ctx.reply(`❌ **Kechirasiz!** Botdan foydalanishdan oldin homiy kanalimizga a'zo bo'lishingiz kerak.\n\n👉 Kanalimiz: ${KANAL_ID}\n\nA'zo bo'lgach, qaytadan /start buyrug'ini bosing.`, {
+            reply_markup: {
+                inline_keyboard: [[{ text: "📢 Kanalga a'zo bo'lish", url: `https://t.me/${KANAL_ID.replace('@', '')}` }]]
+            }
+        });
+    }
+
     return ctx.reply('Salom! Moshina bozor botimizga xush kelibsiz. Quyidagi menudan foydalaning:', mainMenu);
 });
 
-bot.hears("🚗 E'lon berish", (ctx) => {
+bot.hears("🚗 E'lon berish", async (ctx) => {
+    // E'lon berishni bosganda ham har ihtimolga qarshi tekshirish
+    const isSubscribed = await checkSubscription(ctx, ctx.from.id);
+    if (!isSubscribed) {
+        return ctx.reply(`❌ Botdan foydalanish uchun avval kanalimizga a'zo bo'ling:\n\n👉 ${KANAL_ID}`, {
+            reply_markup: {
+                inline_keyboard: [[{ text: "📢 Kanalga a'zo bo'lish", url: `https://t.me/${KANAL_ID.replace('@', '')}` }]]
+            }
+        });
+    }
+
     setUserState(ctx.from.id, 'WAITING_MODEL', {});
     return ctx.reply('🚗 Mashina markasi va modelini kiriting:\n(Masalan: Cobalt, Kia K5, Nexia 3)', { reply_markup: { remove_keyboard: true } });
 });
 
-bot.hears("📦 Mening e'lonlarim", (ctx) => {
+bot.hears("📦 Mening e'lonlarim", async (ctx) => {
     clearUserState(ctx.from.id);
+    
+    const isSubscribed = await checkSubscription(ctx, ctx.from.id);
+    if (!isSubscribed) {
+        return ctx.reply(`❌ Botdan foydalanish uchun avval kanalimizga a'zo bo'ling:\n\n👉 ${KANAL_ID}`, {
+            reply_markup: {
+                inline_keyboard: [[{ text: "📢 Kanalga a'zo bo'lish", url: `https://t.me/${KANAL_ID.replace('@', '')}` }]]
+            }
+        });
+    }
+
     const ads = globalAds.filter(a => a.userId === ctx.from.id);
     if (ads.length === 0) return ctx.reply('🔍 Sizda hozircha hech qanday e\'lon yo\'q.');
 
@@ -224,11 +268,9 @@ bot.on('message', async (ctx, next) => {
                 status: 'active'
             });
 
-            // Kanal linkini toza ko'rinishga keltirish (agar @ belgi bo'lsa, olib tashlaymiz)
             const cleanChannelUsername = KANAL_ID.replace('@', '');
             const postUrl = `https://t.me/${cleanChannelUsername}/${channelMsg.message_id}`;
 
-            // Foydalanuvchiga kanalga bosib o'tadigan chiroyli havola yuborish
             ctx.reply(`✅ E'loningiz kanalga muvaffaqiyatli joylashtirildi!\n\n🔗 [Kanalda e'lon joylandi](${postUrl})`, { 
                 parse_mode: 'Markdown',
                 ...mainMenu 
@@ -321,4 +363,4 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
     bot.launch().catch(err => console.error("Bot ishga tushmadi:", err.message));
 });
-                         
+                                   
