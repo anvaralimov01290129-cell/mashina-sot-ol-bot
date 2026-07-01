@@ -1,4 +1,4 @@
-const { Telegraf, Scenes, session } = require('telegraf');
+const { Telegraf } = require('telegraf');
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -13,47 +13,38 @@ const app = express();
 
 const COUNTER_FILE = path.join(__dirname, 'counter.json');
 const ADS_FILE = path.join(__dirname, 'ads.json');
+const STATES_FILE = path.join(__dirname, 'states.json');
+
+// Ma'lumotlarni faylda saqlash (Server restart bo'lsa ham o'chib ketmaydi)
+function readJSON(file, defaultVal = []) {
+    try { if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { console.error(e); }
+    return defaultVal;
+}
+
+function writeJSON(file, data) {
+    try { fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8'); } catch (e) { console.error(e); }
+}
 
 function getNextOrderNumber() {
-    try {
-        if (fs.existsSync(COUNTER_FILE)) {
-            const data = fs.readFileSync(COUNTER_FILE, 'utf8');
-            const json = JSON.parse(data);
-            json.count = (json.count || 0) + 1;
-            fs.writeFileSync(COUNTER_FILE, JSON.stringify(json), 'utf8');
-            return json.count;
-        } else {
-            const json = { count: 1 };
-            fs.writeFileSync(COUNTER_FILE, JSON.stringify(json), 'utf8');
-            return 1;
-        }
-    } catch (err) { return Math.floor(Math.random() * 1000); }
+    let counter = readJSON(COUNTER_FILE, { count: 0 });
+    counter.count++;
+    writeJSON(COUNTER_FILE, counter);
+    return counter.count;
 }
 
-function readAds() {
-    try { if (fs.existsSync(ADS_FILE)) return JSON.parse(fs.readFileSync(ADS_FILE, 'utf8')); } catch (e) { console.error(e); }
-    return [];
+// Foydalanuvchi qadamlarini boshqarish uchun obyekt
+let userStates = readJSON(STATES_FILE, {});
+
+function setUserState(userId, step, data = {}) {
+    if (!userStates[userId]) userStates[userId] = { step: 'IDLE', data: {} };
+    if (step) userStates[userId].step = step;
+    userStates[userId].data = { ...userStates[userId].data, ...data };
+    writeJSON(STATES_FILE, userStates);
 }
 
-function saveAd(ad) {
-    const ads = readAds();
-    ads.push(ad);
-    fs.writeFileSync(ADS_FILE, JSON.stringify(ads, null, 2), 'utf8');
-}
-
-// Global obyekt - agar session o'chib ketsa ham ma'lumotlar yo'qolmasligi uchun zaxira
-const userStates = {};
-
-function updateAdStatus(elonNo, status) {
-    let ads = readAds();
-    const index = ads.findIndex(a => a.elonNo == elonNo);
-    if (index !== -1) {
-        if (status === 'deleted') { ads.splice(index, 1); } 
-        else { ads[index].status = status; }
-        fs.writeFileSync(ADS_FILE, JSON.stringify(ads, null, 2), 'utf8');
-        return true;
-    }
-    return false;
+function clearUserState(userId) {
+    delete userStates[userId];
+    writeJSON(STATES_FILE, userStates);
 }
 
 async function getRealAvtoelonPrice(model, year) {
@@ -112,7 +103,7 @@ function calculateBackupPrice(model, year, condition) {
     return Math.round(price > 1000 ? price : 1100);
 }
 
-app.get('/', (req, res) => res.send('Bot 24/7 ishlamoqda!'));
+app.get('/', (req, res) => res.send('Bot 24/7 faol ishlamoqda!'));
 
 const mainMenu = {
     reply_markup: {
@@ -136,159 +127,20 @@ const regionsKeyboard = {
     }
 };
 
-const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
-    (ctx) => { 
-        ctx.reply('🚗 Mashina markasi va modelini kiriting:\n(Masalan: Cobalt, Kia K5, Nexia 3)', { reply_markup: { remove_keyboard: true } }); 
-        ctx.wizard.state.data = {}; 
-        userStates[ctx.from.id] = {};
-        return ctx.wizard.next(); 
-    },
-    (ctx) => { 
-        if (!ctx.message || !ctx.message.text) return ctx.reply('Iltimos, modelni matnda yozing:');
-        ctx.wizard.state.data.model = ctx.message.text; 
-        userStates[ctx.from.id].model = ctx.message.text;
-        ctx.reply('📅 Ishlab chiqarilgan yilini kiriting:'); 
-        return ctx.wizard.next(); 
-    },
-    (ctx) => { 
-        if (!ctx.message || !ctx.message.text || isNaN(ctx.message.text)) return ctx.reply('Iltimos, yilni raqamda kiriting:');
-        ctx.wizard.state.data.year = ctx.message.text; 
-        userStates[ctx.from.id].year = ctx.message.text;
-        ctx.reply('🛣 Mashina qancha masofa yurgan? (KM da, faqat raqam):'); 
-        return ctx.wizard.next(); 
-    },
-    (ctx) => { 
-        if (!ctx.message || !ctx.message.text || isNaN(ctx.message.text)) return ctx.reply('Iltimos, masofani raqamda kiriting:');
-        ctx.wizard.state.data.mileage = ctx.message.text; 
-        userStates[ctx.from.id].mileage = ctx.message.text;
-        
-        ctx.reply('🛠 Mashina holatini tanlang:', {
-            reply_markup: {
-                inline_keyboard: [
-                    [{ text: "✨ Toza (Kraska yo'q)", callback_data: "cond_toza" }],
-                    [{ text: "🎨 Petno/Kraska bor", callback_data: "cond_kraska" }],
-                    [{ text: "💥 Urilgan / Yorilgan", callback_data: "cond_yorilgan" }]
-                ]
-            }
-        });
-        return ctx.wizard.next();
-    },
-    async (ctx) => {
-        if (!ctx.callbackQuery) return ctx.reply('Iltimos, tugmalardan birini tanlang:');
-        await ctx.answerCbQuery();
-        
-        let statusText = ""; let condValue = "";
-        if (ctx.callbackQuery.data === "cond_toza") { statusText = "Toza (Kraska yo'q)"; condValue = "toza"; }
-        if (ctx.callbackQuery.data === "cond_kraska") { statusText = "Petno/Kraska bor"; condValue = "kraska_bor"; }
-        if (ctx.callbackQuery.data === "cond_yorilgan") { statusText = "Urilgan / Yorilgan joyi bor"; condValue = "yorilgan_urilgan"; }
-        
-        ctx.wizard.state.data.condition_text = statusText;
-        ctx.wizard.state.data.condition_val = condValue;
-        userStates[ctx.from.id].condition_text = statusText;
-        userStates[ctx.from.id].condition_val = condValue;
-
-        await ctx.reply('📍 Qaysi hududdan / viloyatdansiz? Tanlang:', regionsKeyboard);
-        return ctx.wizard.next();
-    },
-    async (ctx) => {
-        if (!ctx.callbackQuery || !ctx.callbackQuery.data.startsWith('reg_')) return ctx.reply('Iltimos, hududni tugma orqali tanlang:');
-        await ctx.answerCbQuery();
-        
-        const region = ctx.callbackQuery.data.replace('reg_', '');
-        ctx.wizard.state.data.region = region;
-        userStates[ctx.from.id].region = region;
-        
-        const d = ctx.wizard.state.data.model ? ctx.wizard.state.data : userStates[ctx.from.id];
-        
-        await ctx.reply('⏳ Bozor narxi tahlil qilinmoqda...');
-        let realPrice = await getRealAvtoelonPrice(d.model, d.year);
-        if (!realPrice) {
-            realPrice = calculateBackupPrice(d.model, d.year, d.condition_val);
-        } else {
-            if (d.condition_val === 'yorilgan_urilgan') realPrice -= 1400; 
-            else if (d.condition_val === 'kraska_bor') realPrice -= 450;
-            realPrice -= Math.floor((parseInt(d.mileage) || 0) / 50000) * 150;
-        }
-
-        if (d.model.toLowerCase().includes('nexia 1') && parseInt(d.year) < 2000 && realPrice > 2000) {
-            realPrice = calculateBackupPrice(d.model, d.year, d.condition_val);
-        }
-
-        if (realPrice) {
-            ctx.wizard.state.data.suggested_price = `${realPrice} $`;
-            userStates[ctx.from.id].suggested_price = `${realPrice} $`;
-            await ctx.reply(`📊 O'rtacha bozor narxi: **${realPrice} $**\n\n💰 Siz necha pulga sotmoqchisiz?\n(Masalan: 4500)`);
-        } else {
-            ctx.wizard.state.data.suggested_price = "Noaniq (Evro/Xorijiy avto)";
-            userStates[ctx.from.id].suggested_price = "Noaniq (Evro/Xorijiy avto)";
-            await ctx.reply(`✨ Xorijiy/Evro moshinalar uchun avtomatik narx hisoblanmaydi.\n\n💰 Moshinangiz narxini kiriting (faqat raqamda):`);
-        }
-        return ctx.wizard.next();
-    },
-    (ctx) => {
-        if (!ctx.message || !ctx.message.text) return ctx.reply('Iltimos, narxni kiriting:');
-        ctx.wizard.state.data.price = ctx.message.text; 
-        userStates[ctx.from.id].price = ctx.message.text;
-
-        ctx.reply('📞 Telefon raqamingizni yuboring:', { 
-            reply_markup: { keyboard: [[{ text: "📱 Raqamni yuborish", request_contact: true }]], one_time_keyboard: true, resize_keyboard: true } 
-        }); 
-        return ctx.wizard.next();
-    },
-    async (ctx) => {
-        const phone = ctx.message.contact ? ctx.message.contact.phone_number : (ctx.message ? ctx.message.text : null);
-        if (!phone) return ctx.reply('Iltimos, raqamni yuboring:');
-        ctx.wizard.state.data.phone = phone;
-        userStates[ctx.from.id].phone = phone;
-        ctx.reply('🖼 Mashina rasmini yuboring:', { reply_markup: { remove_keyboard: true } });
-        return ctx.wizard.next();
-    },
-    async (ctx) => {
-        if (!ctx.message || !ctx.message.photo) return ctx.reply('Iltimos, mashina rasmini yuboring:');
-        const photoId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-        
-        const d = ctx.wizard.state.data.model ? ctx.wizard.state.data : userStates[ctx.from.id];
-        const elonNo = getNextOrderNumber();
-        
-        let captionText = `📣 **E'LON №${elonNo}**\n\n🚗 #SOTILADI\n\n🚙 Modeli: ${d.model}\n📅 Yili: ${d.year}-yil\n🛣 Yurgani: ${d.mileage} KM\n🛠 Holati: ${d.condition_text}\n📍 Hudud: #__${d.region.replace(' ', '_')}__\n💰 Narxi: **${d.price} $**\n`;
-        if (d.suggested_price !== "Noaniq (Evro/Xorijiy avto)") captionText += `📊 Bozor narxi (Tavsiya): ${d.suggested_price}\n`;
-        captionText += `📞 Tel: ${d.phone}`;
-        
-        try {
-            const channelMsg = await ctx.telegram.sendPhoto(KANAL_ID, photoId, { caption: captionText });
-            
-            saveAd({
-                userId: ctx.from.id,
-                elonNo: elonNo,
-                model: d.model,
-                price: d.price,
-                photoId: photoId,
-                channelMsgId: channelMsg.message_id,
-                caption: captionText,
-                status: 'active'
-            });
-
-            ctx.reply(`✅ E'loningiz kanalga joylashtirildi! (E'lon №${elonNo})`, mainMenu);
-            delete userStates[ctx.from.id];
-        } catch (err) {
-            ctx.reply('Xatolik: Bot e\'lonni kanalga chiqara olmadi.', mainMenu);
-        }
-        return ctx.scene.leave();
-    }
-);
-
-const stage = new Scenes.Stage([carAdWizard]);
-bot.use(session());
-bot.use(stage.middleware());
+// Start va Asosiy tugmalar xizmati
+bot.start((ctx) => {
+    clearUserState(ctx.from.id);
+    return ctx.reply('Salom! Moshina bozor botimizga xush kelibsiz. Quyidagi menudan foydalaning:', mainMenu);
+});
 
 bot.hears("🚗 E'lon berish", (ctx) => {
-    ctx.scene.leave();
-    return ctx.scene.enter('CAR_AD_WIZARD');
+    setUserState(ctx.from.id, 'WAITING_MODEL', {});
+    return ctx.reply('🚗 Mashina markasi va modelini kiriting:\n(Masalan: Cobalt, Kia K5, Nexia 3)', { reply_markup: { remove_keyboard: true } });
 });
 
 bot.hears("📦 Mening e'lonlarim", (ctx) => {
-    ctx.scene.leave();
-    const ads = readAds().filter(a => a.userId === ctx.from.id);
+    clearUserState(ctx.from.id);
+    const ads = readJSON(ADS_FILE).filter(a => a.userId === ctx.from.id);
     if (ads.length === 0) return ctx.reply('🔍 Sizda hozircha hech qanday e\'lon yo\'q.');
 
     ctx.reply(`🗂 Sizning jami e'lonlaringiz soni: ${ads.length} ta.`);
@@ -306,41 +158,174 @@ bot.hears("📦 Mening e'lonlarim", (ctx) => {
     });
 });
 
-bot.on('callback_query', async (ctx) => {
-    const data = ctx.callbackQuery.data;
-    await ctx.answerCbQuery();
+// Xabarlarni qadam bo'yicha qayta ishlash matni (Asosiy logika)
+bot.on('message', async (ctx, next) => {
+    const userId = ctx.from.id;
+    const state = userStates[userId];
 
-    if (data.startsWith('sol_')) {
-        const elonNo = data.replace('sol_', '');
-        const ads = readAds();
-        const ad = ads.find(a => a.elonNo == elonNo && a.userId === ctx.from.id);
+    if (!state || state.step === 'IDLE') return next();
 
-        if (ad) {
-            updateAdStatus(elonNo, 'sold');
-            try {
-                await ctx.telegram.editMessageCaption(KANAL_ID, ad.channelMsgId, null, `🔥 **MAShINA SOTILDI!**\n\n🤝 Barakasini bersin!\n\n${ad.caption}\n\n#SOTILDI`);
-                ctx.reply(`🎉 E'lon №${elonNo} "SOTILDI" holatiga o'tkazildi!`);
-            } catch (e) { ctx.reply(`👍 Botda belgilandi, kanaldagi eski xabarni tahrirlab bo'lmadi.`); }
-        }
+    // 1-QADAM: Model qabul qilish
+    if (state.step === 'WAITING_MODEL') {
+        if (!ctx.message.text) return ctx.reply('Iltimos, modelni matnda yozing:');
+        setUserState(userId, 'WAITING_YEAR', { model: ctx.message.text });
+        return ctx.reply('📅 Ishlab chiqarilgan yilini kiriting:');
     }
 
-    if (data.startsWith('del_')) {
-        const elonNo = data.replace('del_', '');
-        const ads = readAds();
-        const ad = ads.find(a => a.elonNo == elonNo && a.userId === ctx.from.id);
+    // 2-QADAM: Yil qabul qilish
+    if (state.step === 'WAITING_YEAR') {
+        if (!ctx.message.text || isNaN(ctx.message.text)) return ctx.reply('Iltimos, yilni faqat raqamda kiriting:');
+        setUserState(userId, 'WAITING_MILEAGE', { year: ctx.message.text });
+        return ctx.reply('🛣 Mashina qancha masofa yurgan? (KM da, faqat raqam):');
+    }
 
-        if (ad) {
-            updateAdStatus(elonNo, 'deleted');
-            try {
-                await ctx.telegram.deleteMessage(KANAL_ID, ad.channelMsgId);
-                ctx.reply(`🗑 E'lon №${elonNo} o'chirildi.`);
-            } catch (e) { ctx.reply(`🗑 Botdan o'chirildi, kanaldan o'chirishda xatolik (balki e'lon juda eski).`); }
+    // 3-QADAM: Yurgan yo'li
+    if (state.step === 'WAITING_MILEAGE') {
+        if (!ctx.message.text || isNaN(ctx.message.text)) return ctx.reply('Iltimos, masofani faqat raqamda kiriting:');
+        setUserState(userId, 'WAITING_CONDITION', { mileage: ctx.message.text });
+        return ctx.reply('🛠 Mashina holatini tanlang:', {
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: "✨ Toza (Kraska yo'q)", callback_data: "cond_toza" }],
+                    [{ text: "🎨 Petno/Kraska bor", callback_data: "cond_kraska" }],
+                    [{ text: "💥 Urilgan / Yorilgan", callback_data: "cond_yorilgan" }]
+                ]
+            }
+        });
+    }
+
+    // 4-QADAM: Narx kiritish
+    if (state.step === 'WAITING_PRICE') {
+        if (!ctx.message.text) return ctx.reply('Iltimos, narxni yozing:');
+        setUserState(userId, 'WAITING_PHONE', { price: ctx.message.text });
+        return ctx.reply('📞 Telefon raqamingizni yuboring:', { 
+            reply_markup: { keyboard: [[{ text: "📱 Raqamni yuborish", request_contact: true }]], one_time_keyboard: true, resize_keyboard: true } 
+        });
+    }
+
+    // 5-QADAM: Telefon raqam kiritish
+    if (state.step === 'WAITING_PHONE') {
+        const phone = ctx.message.contact ? ctx.message.contact.phone_number : ctx.message.text;
+        if (!phone) return ctx.reply('Iltimos, telefon raqamingizni yuboring:');
+        setUserState(userId, 'WAITING_PHOTO', { phone: phone });
+        return ctx.reply('🖼 Mashina rasmini yuboring:', { reply_markup: { remove_keyboard: true } });
+    }
+
+    // 6-QADAM: Rasm qabul qilish va Kanalga chiqarish
+    if (state.step === 'WAITING_PHOTO') {
+        if (!ctx.message.photo) return ctx.reply('Iltimos, mashina rasmini fayl emas, rasm shaklida yuboring:');
+        const photoId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+        
+        const d = state.data;
+        const elonNo = getNextOrderNumber();
+        
+        let captionText = `📣 **E'LON №${elonNo}**\n\n🚗 #SOTILADI\n\n🚙 Modeli: ${d.model}\n📅 Yili: ${d.year}-yil\n🛣 Yurgani: ${d.mileage} KM\n🛠 Holati: ${d.condition_text}\n📍 Hudud: #__${d.region.replace(' ', '_')}__\n💰 Narxi: **${d.price} $**\n`;
+        if (d.suggested_price !== "Noaniq") captionText += `📊 Bozor narxi (Tavsiya): ${d.suggested_price}\n`;
+        captionText += `📞 Tel: ${d.phone}`;
+        
+        try {
+            const channelMsg = await ctx.telegram.sendPhoto(KANAL_ID, photoId, { caption: captionText });
+            
+            let ads = readJSON(ADS_FILE);
+            ads.push({
+                userId: userId,
+                elonNo: elonNo,
+                model: d.model,
+                price: d.price,
+                photoId: photoId,
+                channelMsgId: channelMsg.message_id,
+                caption: captionText,
+                status: 'active'
+            });
+            writeJSON(ADS_FILE, ads);
+
+            ctx.reply(`✅ E'loningiz kanalga muvaffaqiyatli joylashtirildi! (E'lon №${elonNo})`, mainMenu);
+            clearUserState(userId);
+        } catch (err) {
+            ctx.reply('Xatolik: Bot e\'lonni kanalga chiqara olmadi. Bot kanalizda admin ekanligini tekshiring.', mainMenu);
+            clearUserState(userId);
         }
     }
 });
 
-bot.command('elon', (ctx) => ctx.scene.enter('CAR_AD_WIZARD'));
-bot.start((ctx) => ctx.reply('Salom! Moshina bozor botimizga xush kelibsiz. Quyidagi menudan foydalaning:', mainMenu));
+// Inline tugmalar bosilganda (Callback Query)
+bot.on('callback_query', async (ctx) => {
+    const data = ctx.callbackQuery.data;
+    const userId = ctx.from.id;
+    await ctx.answerCbQuery();
+
+    // Holatni tanlash qadami
+    if (data.startsWith('cond_')) {
+        const state = userStates[userId];
+        if (!state || state.step !== 'WAITING_CONDITION') return;
+
+        let statusText = ""; let condValue = "";
+        if (data === "cond_toza") { statusText = "Toza (Kraska yo'q)"; condValue = "toza"; }
+        if (data === "cond_kraska") { statusText = "Petno/Kraska bor"; condValue = "kraska_bor"; }
+        if (data === "cond_yorilgan") { statusText = "Urilgan / Yorilgan joyi bor"; condValue = "yorilgan_urilgan"; }
+
+        setUserState(userId, 'WAITING_REGION', { condition_text: statusText, condition_val: condValue });
+        return ctx.reply('📍 Qaysi hududdan / viloyatdansiz? Tanlang:', regionsKeyboard);
+    }
+
+    // Hududni tanlash qadami
+    if (data.startsWith('reg_')) {
+        const state = userStates[userId];
+        if (!state || state.step !== 'WAITING_REGION') return;
+
+        const region = data.replace('reg_', '');
+        const d = state.data;
+
+        await ctx.reply('⏳ Bozor narxi tahlil qilinmoqda...');
+        let realPrice = await getRealAvtoelonPrice(d.model, d.year);
+        
+        if (!realPrice) {
+            realPrice = calculateBackupPrice(d.model, d.year, state.data.condition_val);
+        } else {
+            if (state.data.condition_val === 'yorilgan_urilgan') realPrice -= 1400; 
+            else if (state.data.condition_val === 'kraska_bor') realPrice -= 450;
+            realPrice -= Math.floor((parseInt(d.mileage) || 0) / 50000) * 150;
+        }
+
+        let sugPriceText = "Noaniq";
+        if (realPrice) { sugPriceText = `${realPrice} $`; }
+
+        setUserState(userId, 'WAITING_PRICE', { region: region, suggested_price: sugPriceText });
+
+        if (realPrice) {
+            await ctx.reply(`📊 O'rtacha bozor narxi: **${realPrice} $**\n\n💰 Siz necha pulga sotmoqchisiz?\n(Masalan: 4500)`);
+        } else {
+            await ctx.reply(`✨ Ushbu model uchun avtomatik narx hisoblanmadi.\n\n💰 Moshinangiz narxini kiriting (faqat raqamda):`);
+        }
+        return;
+    }
+
+    // E'lonni sotildi qilish yoki o'chirish
+    if (data.startsWith('sol_') || data.startsWith('del_')) {
+        let ads = readJSON(ADS_FILE);
+        const elonNo = data.split('_')[1];
+        const index = ads.findIndex(a => a.elonNo == elonNo && a.userId === userId);
+
+        if (index !== -1) {
+            const ad = ads[index];
+            if (data.startsWith('sol_')) {
+                ads[index].status = 'sold';
+                writeJSON(ADS_FILE, ads);
+                try {
+                    await ctx.telegram.editMessageCaption(KANAL_ID, ad.channelMsgId, null, `🔥 **MOSHINA SOTILDI!**\n\n🤝 Barakasini bersin!\n\n${ad.caption}\n\n#SOTILDI`);
+                    ctx.reply(`🎉 E'lon №${elonNo} "SOTILDI" holatiga o'tkazildi!`);
+                } catch (e) { ctx.reply(`👍 Botda sotildi deb belgilandi!`); }
+            } else if (data.startsWith('del_')) {
+                ads.splice(index, 1);
+                writeJSON(ADS_FILE, ads);
+                try {
+                    await ctx.telegram.deleteMessage(KANAL_ID, ad.channelMsgId);
+                    ctx.reply(`🗑 E'lon №${elonNo} o'chirildi.`);
+                } catch (e) { ctx.reply(`🗑 Botdan o'chirildi.`); }
+            }
+        }
+    }
+});
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', () => {
