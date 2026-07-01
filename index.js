@@ -80,13 +80,12 @@ function calculateBackupPrice(model, year, condition) {
     const m = model.toLowerCase();
     const yr = parseInt(year) || 2010;
 
-    // Har bir model uchun real boshlang'ich narxlar
     if (m.includes('gentra') || m.includes('lacetti')) price = 13500;
     else if (m.includes('cobalt')) price = 12000;
     else if (m.includes('nexia 3')) price = 10500;
     else if (m.includes('spark')) price = 8000;
     else if (m.includes('nexia 2')) price = 5500;
-    else if (m.includes('nexia 1')) price = 4200; // Nexia 1 boshlang'ich narxi real qilindi
+    else if (m.includes('nexia 1')) price = 4200; 
     else if (m.includes('matiz')) price = 3500;
     else if (m.includes('damas')) price = 7000;
     else price = 6000;
@@ -96,24 +95,21 @@ function calculateBackupPrice(model, year, condition) {
 
     if (diff > 0) {
         if (m.includes('nexia 1') || m.includes('matiz') || yr < 2010) {
-            // Eski moshinalar yili uchun keskinroq minus qilinadi
             price -= (diff * 130);
         } else {
             price -= (diff * 350);
         }
     }
 
-    // Holatiga qarab narxni tushirish
     if (condition === 'yorilgan_urilgan') {
         price -= (m.includes('nexia 1') || m.includes('matiz')) ? 500 : 1300;
     } else if (condition === 'kraska_bor') {
         price -= (m.includes('nexia 1') || m.includes('matiz')) ? 250 : 450;
     }
 
-    // === BOZORNING MINIMAL ChEGARALARI ===
     if (m.includes('nexia 1')) {
-        if (price < 1100) price = 1100; // Nexia 1 ning minimal tirik yuradigani
-        if (price > 2300 && yr < 2000) price = 1350; // 1997-yilgi kraskasi bor Nexia 1 narxi chegaralandi
+        if (price < 1100) price = 1100; 
+        if (price > 2300 && yr < 2000) price = 1350; 
     } else if (m.includes('matiz')) {
         if (price < 1500) price = 1500;
     } else if (m.includes('nexia 2')) {
@@ -125,7 +121,6 @@ function calculateBackupPrice(model, year, condition) {
     return Math.round(price);
 }
 
-// Render uxlab qolmasligi uchun endpoint
 app.get('/', (req, res) => res.send('Bot 24/7 ishlamoqda!'));
 bot.use(session());
 
@@ -151,7 +146,7 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
         ctx.reply('🛣 Mashina qancha masofa yurgan? (KM da, faqat raqam):'); 
         return ctx.wizard.next(); 
     },
-    // 4. Holati so'rovnomasi (Tugmalar)
+    // 4. Holati so'rovnomasi
     (ctx) => {
         if (!ctx.message || !ctx.message.text || isNaN(ctx.message.text)) return ctx.reply('Iltimos, yurgan masofasini faqat raqamda kiriting:');
         ctx.wizard.state.data.mileage = ctx.message.text; 
@@ -167,7 +162,7 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
         });
         return ctx.wizard.next();
     },
-    // 5. Avtoelon tahlili va Tel raqam so'rash
+    // 5. Avtoelon tahlilini ko'rsatish va SOTUVChINING O'ZIDAN NARX SO'RASh (YANGI BOSQICh)
     async (ctx) => {
         if (!ctx.callbackQuery) return ctx.reply('Iltimos, yuqoridagi tugmalardan birini tanlang:');
         await ctx.answerCbQuery();
@@ -181,7 +176,7 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
         ctx.wizard.state.data.condition_text = statusText;
         ctx.wizard.state.data.condition_val = condValue;
 
-        await ctx.reply('⏳ Avtoelon.uz saytidan joriy narxlar tekshirilmoqda, iltimos kuting...');
+        await ctx.reply('⏳ Avtoelon.uz bazasidan joriy bozor narxi tahlil qilinmoqda...');
 
         const d = ctx.wizard.state.data;
         let realPrice = await getRealAvtoelonPrice(d.model, d.year);
@@ -189,7 +184,6 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
         if (!realPrice) {
             realPrice = calculateBackupPrice(d.model, d.year, d.condition_val);
         } else {
-            // Onlayn narxdan holatiga ko'ra chegirish
             if (d.condition_val === 'yorilgan_urilgan') realPrice -= 1400; 
             else if (d.condition_val === 'kraska_bor') realPrice -= 450;
             
@@ -197,19 +191,30 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
             realPrice -= Math.floor(km / 50000) * 150;
         }
 
-        // Nexia 1 onlaynda xato narx bersa ham jilovlab qolish
         if (d.model.toLowerCase().includes('nexia 1') && parseInt(d.year) < 2000 && realPrice > 2000) {
             realPrice = calculateBackupPrice(d.model, d.year, d.condition_val);
         }
 
-        ctx.wizard.state.data.price = realPrice;
+        // Tavsiyaviy narxni eslab qolamiz
+        ctx.wizard.state.data.suggested_price = realPrice;
 
-        ctx.reply(`📊 Avtoelon.uz tahliliga ko'ra moshina narxi taxminan: **${realPrice} $**\n\n📞 Telefon raqamingizni yuboring:`, { 
+        // Foydalanuvchidan o'z narxini so'raymiz
+        await ctx.reply(`📊 Avtoelon.uz tahliliga ko'ra, moshinangizning o'rtacha bozor narxi: **${realPrice} $**\n\n💰 Siz moshinangizni necha pulga sotmoqchisiz?\n(Faqat raqam kiriting, masalan: 1300 yoki 12500)`);
+        return ctx.wizard.next();
+    },
+    // 6. Sotuvchi kiritgan narxni qabul qilish va Tel raqam so'rash
+    (ctx) => {
+        if (!ctx.message || !ctx.message.text || isNaN(ctx.message.text)) {
+            return ctx.reply('Iltimos, narxni faqat raqamlarda kiriting (Masalan: 4500):');
+        }
+        ctx.wizard.state.data.price = ctx.message.text; // Sotuvchi qo'ygan narx yozildi
+
+        ctx.reply('📞 Telefon raqamingizni yuboring:', { 
             reply_markup: { keyboard: [[{ text: "📱 Raqamni yuborish", request_contact: true }]], one_time_keyboard: true, resize_keyboard: true } 
         }); 
-        return ctx.wizard.next(); 
+        return ctx.wizard.next();
     },
-    // 6. Rasm so'rash
+    // 7. Rasm so'rash
     async (ctx) => {
         const phone = ctx.message.contact ? ctx.message.contact.phone_number : (ctx.message ? ctx.message.text : null);
         if (!phone) return ctx.reply('Iltimos, raqamni yuboring:');
@@ -217,7 +222,7 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
         ctx.reply('🖼 Mashina rasmini yuboring:', { reply_markup: { remove_keyboard: true } });
         return ctx.wizard.next();
     },
-    // 7. Kanalga e'lonni chiqarish va yopish
+    // 8. Kanalga chiqarish
     async (ctx) => {
         if (!ctx.message || !ctx.message.photo) return ctx.reply('Iltimos, mashina rasmini yuboring:');
         const photoId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
@@ -226,23 +231,21 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
         
         try {
             await ctx.telegram.sendPhoto(KANAL_ID, photoId, { 
-                caption: `📣 **E'LON №${elonNo}**\n\n🚗 #SOTILADI\n\n🚙 Modeli: ${d.model}\n📅 Yili: ${d.year}-yil\n🛣 Yurgani: ${d.mileage} KM\n🛠 Holati: ${d.condition_text}\n💰 Baholangan narxi: **${d.price} $**\n📞 Tel: ${d.phone}` 
+                caption: `📣 **E'LON №${elonNo}**\n\n🚗 #SOTILADI\n\n🚙 Modeli: ${d.model}\n📅 Yili: ${d.year}-yil\n🛣 Yurgani: ${d.mileage} KM\n🛠 Holati: ${d.condition_text}\n💰 Narxi: **${d.price} $**\n📊 Bozor narxi (Tavsiya): ${d.suggested_price} $\n📞 Tel: ${d.phone}` 
             });
-            ctx.reply(`✅ E'loningiz Avtoelon.uz bazasi bo'yicha hisoblandi va kanalga joylashtirildi! (E'lon №${elonNo})`);
+            ctx.reply(`✅ E'loningiz siz ko'rsatgan narxda kanalga joylashtirildi! (E'lon №${elonNo})`);
         } catch (err) {
-            ctx.reply('Xatolik: Bot e\'lonni kanalga chiqara olmadi. Bot kanalda admin ekanligini tekshiring!');
+            ctx.reply('Xatolik: Bot e\'lonni kanalga chiqara olmadi.');
         }
         return ctx.scene.leave();
     }
 );
 
 const stage = new Scenes.Stage([carAdWizard]);
-
 stage.start(async (ctx) => { await ctx.scene.leave(); return ctx.reply('Salom! E\'lon berish uchun /elon buyrug\'ini bosing.'); });
 stage.command('elon', async (ctx) => { await ctx.scene.leave(); return ctx.scene.enter('CAR_AD_WIZARD'); });
 
 bot.use(stage.middleware());
-
 bot.command('elon', (ctx) => ctx.scene.enter('CAR_AD_WIZARD'));
 bot.start((ctx) => ctx.reply('Salom! E\'lon berish uchun /elon buyrug\'ini bosing.'));
 
@@ -254,4 +257,4 @@ app.listen(PORT, '0.0.0.0', () => {
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-                
+        
