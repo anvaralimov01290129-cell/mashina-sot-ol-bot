@@ -74,19 +74,55 @@ async function getRealAvtoelonPrice(model, year) {
     return null; 
 }
 
-// Zaxira kalkulyator (agar Avtoelon sayti vaqtincha javob bermasa)
+// === ESKI MOShINALAR UChUN TO'G'RILANGAN ZAXIRA KALKULYATORI ===
 function calculateBackupPrice(model, year, condition) {
     let price = 11000;
     const m = model.toLowerCase();
-    if (m.includes('gentra')) price = 14000;
-    else if (m.includes('cobalt')) price = 12500;
-    else if (m.includes('nexia 3')) price = 11000;
+    const yr = parseInt(year) || 2010;
+
+    // Har bir model uchun real boshlang'ich narxlar
+    if (m.includes('gentra') || m.includes('lacetti')) price = 13500;
+    else if (m.includes('cobalt')) price = 12000;
+    else if (m.includes('nexia 3')) price = 10500;
+    else if (m.includes('spark')) price = 8000;
+    else if (m.includes('nexia 2')) price = 5500;
+    else if (m.includes('nexia 1')) price = 4200; // Nexia 1 boshlang'ich narxi real qilindi
     else if (m.includes('matiz')) price = 3500;
-    
-    const diff = 2026 - parseInt(year);
-    price -= (diff * 400);
-    if (condition === 'yorilgan_urilgan') price -= 1200;
-    return price < 2000 ? 2000 : price;
+    else if (m.includes('damas')) price = 7000;
+    else price = 6000;
+
+    const currentYear = 2026;
+    const diff = currentYear - yr;
+
+    if (diff > 0) {
+        if (m.includes('nexia 1') || m.includes('matiz') || yr < 2010) {
+            // Eski moshinalar yili uchun keskinroq minus qilinadi
+            price -= (diff * 130);
+        } else {
+            price -= (diff * 350);
+        }
+    }
+
+    // Holatiga qarab narxni tushirish
+    if (condition === 'yorilgan_urilgan') {
+        price -= (m.includes('nexia 1') || m.includes('matiz')) ? 500 : 1300;
+    } else if (condition === 'kraska_bor') {
+        price -= (m.includes('nexia 1') || m.includes('matiz')) ? 250 : 450;
+    }
+
+    // === BOZORNING MINIMAL ChEGARALARI ===
+    if (m.includes('nexia 1')) {
+        if (price < 1100) price = 1100; // Nexia 1 ning minimal tirik yuradigani
+        if (price > 2300 && yr < 2000) price = 1350; // 1997-yilgi kraskasi bor Nexia 1 narxi chegaralandi
+    } else if (m.includes('matiz')) {
+        if (price < 1500) price = 1500;
+    } else if (m.includes('nexia 2')) {
+        if (price < 2800) price = 2800;
+    } else if (m.includes('gentra') || m.includes('cobalt')) {
+        if (price < 6500) price = 6500;
+    }
+
+    return Math.round(price);
 }
 
 // Render uxlab qolmasligi uchun endpoint
@@ -153,12 +189,17 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
         if (!realPrice) {
             realPrice = calculateBackupPrice(d.model, d.year, d.condition_val);
         } else {
-            // Avtoelon o'rtacha narxidan holatiga qarab chegirish
-            if (d.condition_val === 'yorilgan_urilgan') realPrice -= 1400; // Yorilgan bo'lsa keskin tushadi
+            // Onlayn narxdan holatiga ko'ra chegirish
+            if (d.condition_val === 'yorilgan_urilgan') realPrice -= 1400; 
             else if (d.condition_val === 'kraska_bor') realPrice -= 450;
             
             const km = parseInt(d.mileage) || 0;
             realPrice -= Math.floor(km / 50000) * 150;
+        }
+
+        // Nexia 1 onlaynda xato narx bersa ham jilovlab qolish
+        if (d.model.toLowerCase().includes('nexia 1') && parseInt(d.year) < 2000 && realPrice > 2000) {
+            realPrice = calculateBackupPrice(d.model, d.year, d.condition_val);
         }
 
         ctx.wizard.state.data.price = realPrice;
@@ -197,17 +238,14 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
 
 const stage = new Scenes.Stage([carAdWizard]);
 
-// Sahnaning ichida turganda /start yoki /elon bosilsa seansni yangilash
 stage.start(async (ctx) => { await ctx.scene.leave(); return ctx.reply('Salom! E\'lon berish uchun /elon buyrug\'ini bosing.'); });
 stage.command('elon', async (ctx) => { await ctx.scene.leave(); return ctx.scene.enter('CAR_AD_WIZARD'); });
 
 bot.use(stage.middleware());
 
-// Global buyruqlar
 bot.command('elon', (ctx) => ctx.scene.enter('CAR_AD_WIZARD'));
 bot.start((ctx) => ctx.reply('Salom! E\'lon berish uchun /elon buyrug\'ini bosing.'));
 
-// Port va tarmoq sozlamalari (Render uchun)
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
@@ -216,4 +254,4 @@ app.listen(PORT, '0.0.0.0', () => {
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-                             
+                
