@@ -1,7 +1,5 @@
 const { Telegraf } = require('telegraf');
 const express = require('express');
-const fs = require('fs');
-const path = require('path');
 const axios = require('axios');
 const cheerio = require('cheerio');
 
@@ -11,40 +9,19 @@ const KANAL_ID = '@mashinasotvasotibol';
 const bot = new Telegraf(BOT_TOKEN);
 const app = express();
 
-const COUNTER_FILE = path.join(__dirname, 'counter.json');
-const ADS_FILE = path.join(__dirname, 'ads.json');
-const STATES_FILE = path.join(__dirname, 'states.json');
-
-// Ma'lumotlarni faylda saqlash (Server restart bo'lsa ham o'chib ketmaydi)
-function readJSON(file, defaultVal = []) {
-    try { if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { console.error(e); }
-    return defaultVal;
-}
-
-function writeJSON(file, data) {
-    try { fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8'); } catch (e) { console.error(e); }
-}
-
-function getNextOrderNumber() {
-    let counter = readJSON(COUNTER_FILE, { count: 0 });
-    counter.count++;
-    writeJSON(COUNTER_FILE, counter);
-    return counter.count;
-}
-
-// Foydalanuvchi qadamlarini boshqarish uchun obyekt
-let userStates = readJSON(STATES_FILE, {});
+// Render crash bo'lmasligi uchun xotirada (RAM) saqlash tizimi
+let userStates = {};
+let globalAds = [];
+let adCounter = 1000; 
 
 function setUserState(userId, step, data = {}) {
     if (!userStates[userId]) userStates[userId] = { step: 'IDLE', data: {} };
     if (step) userStates[userId].step = step;
     userStates[userId].data = { ...userStates[userId].data, ...data };
-    writeJSON(STATES_FILE, userStates);
 }
 
 function clearUserState(userId) {
     delete userStates[userId];
-    writeJSON(STATES_FILE, userStates);
 }
 
 async function getRealAvtoelonPrice(model, year) {
@@ -103,7 +80,7 @@ function calculateBackupPrice(model, year, condition) {
     return Math.round(price > 1000 ? price : 1100);
 }
 
-app.get('/', (req, res) => res.send('Bot 24/7 faol ishlamoqda!'));
+app.get('/', (req, res) => res.send('Bot 24/7 muvaffaqiyatli ishlamoqda!'));
 
 const mainMenu = {
     reply_markup: {
@@ -127,7 +104,6 @@ const regionsKeyboard = {
     }
 };
 
-// Start va Asosiy tugmalar xizmati
 bot.start((ctx) => {
     clearUserState(ctx.from.id);
     return ctx.reply('Salom! Moshina bozor botimizga xush kelibsiz. Quyidagi menudan foydalaning:', mainMenu);
@@ -140,7 +116,7 @@ bot.hears("🚗 E'lon berish", (ctx) => {
 
 bot.hears("📦 Mening e'lonlarim", (ctx) => {
     clearUserState(ctx.from.id);
-    const ads = readJSON(ADS_FILE).filter(a => a.userId === ctx.from.id);
+    const ads = globalAds.filter(a => a.userId === ctx.from.id);
     if (ads.length === 0) return ctx.reply('🔍 Sizda hozircha hech qanday e\'lon yo\'q.');
 
     ctx.reply(`🗂 Sizning jami e'lonlaringiz soni: ${ads.length} ta.`);
@@ -158,7 +134,6 @@ bot.hears("📦 Mening e'lonlarim", (ctx) => {
     });
 });
 
-// Xabarlarni qadam bo'yicha qayta ishlash matni (Asosiy logika)
 bot.on('message', async (ctx, next) => {
     const userId = ctx.from.id;
     const state = userStates[userId];
@@ -217,119 +192,113 @@ bot.on('message', async (ctx, next) => {
         const photoId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
         
         const d = state.data;
-        const elonNo = getNextOrderNumber();
+        adCounter++;
+        const elonNo = adCounter;
         
-        let captionText = `📣 **E'LON №${elonNo}**\n\n🚗 #SOTILADI\n\n🚙 Modeli: ${d.model}\n📅 Yili: ${d.year}-yil\n🛣 Yurgani: ${d.mileage} KM\n🛠 Holati: ${d.condition_text}\n📍 Hudud: #__${d.region.replace(' ', '_')}__\n💰 Narxi: **${d.price} $**\n`;
-        if (d.suggested_price !== "Noaniq") captionText += `📊 Bozor narxi (Tavsiya): ${d.suggested_price}\n`;
-        captionText += `📞 Tel: ${d.phone}`;
+        let captionText = `📣 **E'LON №${elonNo}**\n\n🚗 #SOTILADI\n\n🚙 Modeli: ${d.model || 'Noma\'lum'}\n📅 Yili: ${d.year || ''}-yil\n🛣 Yurgani: ${d.mileage || 0} KM\n🛠 Holati: ${d.condition_text || ''}\n📍 Hudud: #__${(d.region || 'Toshkent').replace(' ', '_')}__\n💰 Narxi: **${ctx.message.text || d.price} $**\n`;
+        if (d.suggested_price && d.suggested_price !== "Noaniq") captionText += `📊 Bozor narxi (Tavsiya): ${d.suggested_price}\n`;
+        captionText += `📞 Tel: ${d.phone || ''}`;
         
         try {
             const channelMsg = await ctx.telegram.sendPhoto(KANAL_ID, photoId, { caption: captionText });
             
-            let ads = readJSON(ADS_FILE);
-            ads.push({
+            globalAds.push({
                 userId: userId,
                 elonNo: elonNo,
                 model: d.model,
-                price: d.price,
+                price: ctx.message.text || d.price,
                 photoId: photoId,
                 channelMsgId: channelMsg.message_id,
                 caption: captionText,
                 status: 'active'
             });
-            writeJSON(ADS_FILE, ads);
 
             ctx.reply(`✅ E'loningiz kanalga muvaffaqiyatli joylashtirildi! (E'lon №${elonNo})`, mainMenu);
             clearUserState(userId);
         } catch (err) {
-            ctx.reply('Xatolik: Bot e\'lonni kanalga chiqara olmadi. Bot kanalizda admin ekanligini tekshiring.', mainMenu);
+            ctx.reply('Xatolik: Bot e\'lonni kanalga chiqara olmadi. Bot kanalda admin ekanligini va ruxsatlari borligini tekshiring.', mainMenu);
             clearUserState(userId);
         }
     }
 });
 
-// Inline tugmalar bosilganda (Callback Query)
 bot.on('callback_query', async (ctx) => {
-    const data = ctx.callbackQuery.data;
-    const userId = ctx.from.id;
-    await ctx.answerCbQuery();
+    try {
+        const data = ctx.callbackQuery.data;
+        const userId = ctx.from.id;
+        await ctx.answerCbQuery();
 
-    // Holatni tanlash qadami
-    if (data.startsWith('cond_')) {
-        const state = userStates[userId];
-        if (!state || state.step !== 'WAITING_CONDITION') return;
+        if (data.startsWith('cond_')) {
+            const state = userStates[userId];
+            if (!state || state.step !== 'WAITING_CONDITION') return;
 
-        let statusText = ""; let condValue = "";
-        if (data === "cond_toza") { statusText = "Toza (Kraska yo'q)"; condValue = "toza"; }
-        if (data === "cond_kraska") { statusText = "Petno/Kraska bor"; condValue = "kraska_bor"; }
-        if (data === "cond_yorilgan") { statusText = "Urilgan / Yorilgan joyi bor"; condValue = "yorilgan_urilgan"; }
+            let statusText = ""; let condValue = "";
+            if (data === "cond_toza") { statusText = "Toza (Kraska yo'q)"; condValue = "toza"; }
+            if (data === "cond_kraska") { statusText = "Petno/Kraska bor"; condValue = "kraska_bor"; }
+            if (data === "cond_yorilgan") { statusText = "Urilgan / Yorilgan joyi bor"; condValue = "yorilgan_urilgan"; }
 
-        setUserState(userId, 'WAITING_REGION', { condition_text: statusText, condition_val: condValue });
-        return ctx.reply('📍 Qaysi hududdan / viloyatdansiz? Tanlang:', regionsKeyboard);
-    }
-
-    // Hududni tanlash qadami
-    if (data.startsWith('reg_')) {
-        const state = userStates[userId];
-        if (!state || state.step !== 'WAITING_REGION') return;
-
-        const region = data.replace('reg_', '');
-        const d = state.data;
-
-        await ctx.reply('⏳ Bozor narxi tahlil qilinmoqda...');
-        let realPrice = await getRealAvtoelonPrice(d.model, d.year);
-        
-        if (!realPrice) {
-            realPrice = calculateBackupPrice(d.model, d.year, state.data.condition_val);
-        } else {
-            if (state.data.condition_val === 'yorilgan_urilgan') realPrice -= 1400; 
-            else if (state.data.condition_val === 'kraska_bor') realPrice -= 450;
-            realPrice -= Math.floor((parseInt(d.mileage) || 0) / 50000) * 150;
+            setUserState(userId, 'WAITING_REGION', { condition_text: statusText, condition_val: condValue });
+            return ctx.reply('📍 Qaysi hududdan / viloyatdansiz? Tanlang:', regionsKeyboard);
         }
 
-        let sugPriceText = "Noaniq";
-        if (realPrice) { sugPriceText = `${realPrice} $`; }
+        if (data.startsWith('reg_')) {
+            const state = userStates[userId];
+            if (!state || state.step !== 'WAITING_REGION') return;
 
-        setUserState(userId, 'WAITING_PRICE', { region: region, suggested_price: sugPriceText });
+            const region = data.replace('reg_', '');
+            const d = state.data;
 
-        if (realPrice) {
-            await ctx.reply(`📊 O'rtacha bozor narxi: **${realPrice} $**\n\n💰 Siz necha pulga sotmoqchisiz?\n(Masalan: 4500)`);
-        } else {
-            await ctx.reply(`✨ Ushbu model uchun avtomatik narx hisoblanmadi.\n\n💰 Moshinangiz narxini kiriting (faqat raqamda):`);
+            await ctx.reply('⏳ Bozor narxi tahlil qilinmoqda...');
+            let realPrice = await getRealAvtoelonPrice(d.model, d.year);
+            
+            if (!realPrice) {
+                realPrice = calculateBackupPrice(d.model, d.year, d.condition_val);
+            } else {
+                if (d.condition_val === 'yorilgan_urilgan') realPrice -= 1400; 
+                else if (d.condition_val === 'kraska_bor') realPrice -= 450;
+                realPrice -= Math.floor((parseInt(d.mileage) || 0) / 50000) * 150;
+            }
+
+            let sugPriceText = "Noaniq";
+            if (realPrice) { sugPriceText = `${realPrice} $`; }
+
+            setUserState(userId, 'WAITING_PRICE', { region: region, suggested_price: sugPriceText });
+
+            if (realPrice) {
+                await ctx.reply(`📊 O'rtacha bozor narxi: **${realPrice} $**\n\n💰 Siz necha pulga sotmoqchisiz?\n(Masalan: 4500)`);
+            } else {
+                await ctx.reply(`✨ Ushbu model uchun avtomatik narx hisoblanmadi.\n\n💰 Moshinangiz narxini kiriting (faqat raqamda):`);
+            }
+            return;
         }
-        return;
-    }
 
-    // E'lonni sotildi qilish yoki o'chirish
-    if (data.startsWith('sol_') || data.startsWith('del_')) {
-        let ads = readJSON(ADS_FILE);
-        const elonNo = data.split('_')[1];
-        const index = ads.findIndex(a => a.elonNo == elonNo && a.userId === userId);
+        if (data.startsWith('sol_') || data.startsWith('del_')) {
+            const elonNo = data.split('_')[1];
+            const index = globalAds.findIndex(a => a.elonNo == elonNo && a.userId === userId);
 
-        if (index !== -1) {
-            const ad = ads[index];
-            if (data.startsWith('sol_')) {
-                ads[index].status = 'sold';
-                writeJSON(ADS_FILE, ads);
-                try {
-                    await ctx.telegram.editMessageCaption(KANAL_ID, ad.channelMsgId, null, `🔥 **MOSHINA SOTILDI!**\n\n🤝 Barakasini bersin!\n\n${ad.caption}\n\n#SOTILDI`);
-                    ctx.reply(`🎉 E'lon №${elonNo} "SOTILDI" holatiga o'tkazildi!`);
-                } catch (e) { ctx.reply(`👍 Botda sotildi deb belgilandi!`); }
-            } else if (data.startsWith('del_')) {
-                ads.splice(index, 1);
-                writeJSON(ADS_FILE, ads);
-                try {
-                    await ctx.telegram.deleteMessage(KANAL_ID, ad.channelMsgId);
-                    ctx.reply(`🗑 E'lon №${elonNo} o'chirildi.`);
-                } catch (e) { ctx.reply(`🗑 Botdan o'chirildi.`); }
+            if (index !== -1) {
+                const ad = globalAds[index];
+                if (data.startsWith('sol_')) {
+                    globalAds[index].status = 'sold';
+                    try {
+                        await ctx.telegram.editMessageCaption(KANAL_ID, ad.channelMsgId, null, `🔥 **MOSHINA SOTILDI!**\n\n🤝 Barakasini bersin!\n\n${ad.caption}\n\n#SOTILDI`);
+                        ctx.reply(`🎉 E'lon №${elonNo} "SOTILDI" holatiga o'tkazildi!`);
+                    } catch (e) { ctx.reply(`👍 Botda sotildi deb belgilandi!`); }
+                } else if (data.startsWith('del_')) {
+                    globalAds.splice(index, 1);
+                    try {
+                        await ctx.telegram.deleteMessage(KANAL_ID, ad.channelMsgId);
+                        ctx.reply(`🗑 E'lon №${elonNo} o'chirildi.`);
+                    } catch (e) { ctx.reply(`🗑 Botdan o'chirildi.`); }
+                }
             }
         }
-    }
+    } catch (e) { console.error("Callback xatosi:", e.message); }
 });
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
-    bot.launch();
+    bot.launch().catch(err => console.error("Bot ishga tushmadi:", err.message));
 });
-    
+                                                                           
