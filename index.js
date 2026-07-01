@@ -173,17 +173,29 @@ bot.on('message', async (ctx, next) => {
     if (state.step === 'WAITING_PRICE') {
         if (!ctx.message.text) return ctx.reply('Iltimos, narxni yozing:');
         setUserState(userId, 'WAITING_PHONE', { price: ctx.message.text });
-        return ctx.reply('📞 Telefon raqamingizni yuboring:', { 
+        return ctx.reply('📞 Telefon raqamingizni kiriting yoki pastdagi tugmani bosing:\nMasalan: 991234567', { 
             reply_markup: { keyboard: [[{ text: "📱 Raqamni yuborish", request_contact: true }]], one_time_keyboard: true, resize_keyboard: true } 
         });
     }
 
-    // 5-QADAM: Telefon raqam kiritish
+    // 5-QADAM: Telefon raqam kiritish (Matn yoki Kontakt tugmasi orqali)
     if (state.step === 'WAITING_PHONE') {
-        const phone = ctx.message.contact ? ctx.message.contact.phone_number : ctx.message.text;
-        if (!phone) return ctx.reply('Iltimos, telefon raqamingizni yuboring:');
-        setUserState(userId, 'WAITING_PHOTO', { phone: phone });
-        return ctx.reply('🖼 Mashina rasmini yuboring:', { reply_markup: { remove_keyboard: true } });
+        let phone = ctx.message.contact ? ctx.message.contact.phone_number : ctx.message.text;
+        
+        if (!phone) {
+            return ctx.reply('⚠️ Iltimos, telefon raqamingizni yozing yoki tugmani bosing:');
+        }
+
+        // Raqam formatini tozalash (bo'shliqlarni olib tashlash) va tekshirish
+        let cleanPhone = phone.toString().replace(/\s+/g, '');
+        const phoneRegex = /^(\+?\d{9,13})$/;
+
+        if (!phoneRegex.test(cleanPhone)) {
+            return ctx.reply('⚠️ Noto\'g\'ri format. Iltimos, raqamni to\'g\'ri kiriting:\nMasalan: 991234567 yoki +998991234567');
+        }
+        
+        setUserState(userId, 'WAITING_PHOTO', { phone: cleanPhone });
+        return ctx.reply('🖼 Endi mashinangizning rasmini yuboring:', { reply_markup: { remove_keyboard: true } });
     }
 
     // 6-QADAM: Rasm qabul qilish va Kanalga chiqarish
@@ -195,7 +207,7 @@ bot.on('message', async (ctx, next) => {
         adCounter++;
         const elonNo = adCounter;
         
-        let captionText = `📣 **E'LON №${elonNo}**\n\n🚗 #SOTILADI\n\n🚙 Modeli: ${d.model || 'Noma\'lum'}\n📅 Yili: ${d.year || ''}-yil\n🛣 Yurgani: ${d.mileage || 0} KM\n🛠 Holati: ${d.condition_text || ''}\n📍 Hudud: #__${(d.region || 'Toshkent').replace(' ', '_')}__\n💰 Narxi: **${ctx.message.text || d.price} $**\n`;
+        let captionText = `📣 **E'LON №${elonNo}**\n\n🚗 #SOTILADI\n\n🚙 Modeli: ${d.model || 'Noma\'lum'}\n📅 Yili: ${d.year || ''}-yil\n🛣 Yurgani: ${d.mileage || 0} KM\n🛠 Holati: ${d.condition_text || ''}\n📍 Hudud: #__${(d.region || 'Toshkent').replace(' ', '_')}__\n💰 Narxi: **${d.price} $**\n`;
         if (d.suggested_price && d.suggested_price !== "Noaniq") captionText += `📊 Bozor narxi (Tavsiya): ${d.suggested_price}\n`;
         captionText += `📞 Tel: ${d.phone || ''}`;
         
@@ -206,7 +218,7 @@ bot.on('message', async (ctx, next) => {
                 userId: userId,
                 elonNo: elonNo,
                 model: d.model,
-                price: ctx.message.text || d.price,
+                price: d.price,
                 photoId: photoId,
                 channelMsgId: channelMsg.message_id,
                 caption: captionText,
@@ -301,4 +313,3 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
     bot.launch().catch(err => console.error("Bot ishga tushmadi:", err.message));
 });
-                                                                           
