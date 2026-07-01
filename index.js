@@ -178,7 +178,7 @@ bot.on('message', async (ctx, next) => {
         });
     }
 
-    // 5-QADAM: Telefon raqam kiritish (Matn yoki Kontakt tugmasi orqali)
+    // 5-QADAM: Telefon raqam kiritish
     if (state.step === 'WAITING_PHONE') {
         let phone = ctx.message.contact ? ctx.message.contact.phone_number : ctx.message.text;
         
@@ -186,7 +186,6 @@ bot.on('message', async (ctx, next) => {
             return ctx.reply('⚠️ Iltimos, telefon raqamingizni yozing yoki tugmani bosing:');
         }
 
-        // Raqam formatini tozalash (bo'shliqlarni olib tashlash) va tekshirish
         let cleanPhone = phone.toString().replace(/\s+/g, '');
         const phoneRegex = /^(\+?\d{9,13})$/;
 
@@ -225,7 +224,16 @@ bot.on('message', async (ctx, next) => {
                 status: 'active'
             });
 
-            ctx.reply(`✅ E'loningiz kanalga muvaffaqiyatli joylashtirildi! (E'lon №${elonNo})`, mainMenu);
+            // Kanal linkini toza ko'rinishga keltirish (agar @ belgi bo'lsa, olib tashlaymiz)
+            const cleanChannelUsername = KANAL_ID.replace('@', '');
+            const postUrl = `https://t.me/${cleanChannelUsername}/${channelMsg.message_id}`;
+
+            // Foydalanuvchiga kanalga bosib o'tadigan chiroyli havola yuborish
+            ctx.reply(`✅ E'loningiz kanalga muvaffaqiyatli joylashtirildi!\n\n🔗 [Kanalda e'lon joylandi](${postUrl})`, { 
+                parse_mode: 'Markdown',
+                ...mainMenu 
+            });
+            
             clearUserState(userId);
         } catch (err) {
             ctx.reply('Xatolik: Bot e\'lonni kanalga chiqara olmadi. Bot kanalda admin ekanligini va ruxsatlari borligini tekshiring.', mainMenu);
@@ -313,3 +321,4 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
     bot.launch().catch(err => console.error("Bot ishga tushmadi:", err.message));
 });
+                         
