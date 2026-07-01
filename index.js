@@ -3,6 +3,7 @@ const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
 
+// MAJBURIY KANAL VA E'LONLAR KANALI BITTADA JAMLANDI
 const BOT_TOKEN = '8998326453:AAH1JROgEtTuSGrFsrs4oZCwQylxULDlXwU';
 const KANAL_ID = '@mashinasotvasotibol'; 
 
@@ -24,7 +25,7 @@ function clearUserState(userId) {
     delete userStates[userId];
 }
 
-// Kanalga a'zolikni tekshirish funksiyasi
+// Kanalga a'zolikni tekshirish funksiyasi (@mashinasotvasotibol uchun)
 async function checkSubscription(ctx, userId) {
     try {
         const member = await ctx.telegram.getChatMember(KANAL_ID, userId);
@@ -32,7 +33,6 @@ async function checkSubscription(ctx, userId) {
         return allowedStatuses.includes(member.status);
     } catch (error) {
         console.error("A'zolikni tekshirishda xatolik:", error.message);
-        // Agar bot kanalda admin bo'lmasa yoki xato bo'lsa, hamma o'ta oladigan qilib turamiz
         return true; 
     }
 }
@@ -120,10 +120,9 @@ const regionsKeyboard = {
 bot.start(async (ctx) => {
     clearUserState(ctx.from.id);
     
-    // Start bosganda a'zolikni tekshirish
     const isSubscribed = await checkSubscription(ctx, ctx.from.id);
     if (!isSubscribed) {
-        return ctx.reply(`❌ **Kechirasiz!** Botdan foydalanishdan oldin homiy kanalimizga a'zo bo'lishingiz kerak.\n\n👉 Kanalimiz: ${KANAL_ID}\n\nA'zo bo'lgach, qaytadan /start buyrug'ini bosing.`, {
+        return ctx.reply(`❌ **Kechirasiz!** Botdan foydalanishdan oldin rasmiy kanalimizga a'zo bo'lishingiz kerak.\n\n👉 Kanalimiz: ${KANAL_ID}\n\nA'zo bo'lgach, qaytadan /start buyrug'ini bosing.`, {
             reply_markup: {
                 inline_keyboard: [[{ text: "📢 Kanalga a'zo bo'lish", url: `https://t.me/${KANAL_ID.replace('@', '')}` }]]
             }
@@ -134,7 +133,6 @@ bot.start(async (ctx) => {
 });
 
 bot.hears("🚗 E'lon berish", async (ctx) => {
-    // E'lon berishni bosganda ham har ihtimolga qarshi tekshirish
     const isSubscribed = await checkSubscription(ctx, ctx.from.id);
     if (!isSubscribed) {
         return ctx.reply(`❌ Botdan foydalanish uchun avval kanalimizga a'zo bo'ling:\n\n👉 ${KANAL_ID}`, {
@@ -363,4 +361,4 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
     bot.launch().catch(err => console.error("Bot ishga tushmadi:", err.message));
 });
-                                   
+                
