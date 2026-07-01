@@ -10,9 +10,19 @@ const KANAL_ID = '@mashinasotvasotibol';
 const bot = new Telegraf(BOT_TOKEN);
 const app = express();
 
+// Foydalanuvchilar holati va e'lonlar xotirada saqlanadi
 let userStates = {};
 let globalAds = [];
 let adCounter = 1000; 
+
+// SERVER CRASH BO'lishini OLDINI OLISH (BOT TO'XTAMAYDI)
+process.on('uncaughtException', (err) => {
+    console.error('Kutilmagan xatolik (Bot to\'xtamadi):', err.message);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('Vada bajarilmadi (Bot to\'xtamadi):', reason);
+});
 
 function setUserState(userId, step, data = {}) {
     if (!userStates[userId]) userStates[userId] = { step: 'IDLE', data: {} };
@@ -24,19 +34,19 @@ function clearUserState(userId) {
     delete userStates[userId];
 }
 
-// Kanalga a'zolikni tekshirish funksiyasi
+// 100% Aniq ishlaydigan a'zolikni tekshirish funksiyasi
 async function checkSubscription(ctx, userId) {
     try {
         const member = await ctx.telegram.getChatMember(KANAL_ID, userId);
         const allowedStatuses = ['creator', 'administrator', 'member'];
         return allowedStatuses.includes(member.status);
     } catch (error) {
-        console.error("A'zolikni tekshirishda xatolik:", error.message);
-        return true; 
+        console.error("Kanal tekshirishda xato (Bot foydalanuvchini bloklaydi):", error.message);
+        // Bot xato bersa ham majburiy kanal oynasini ko'rsatadi, adashib o'tkazib yubormaydi
+        return false; 
     }
 }
 
-// Tuzatilgan va soddalashtirilgan narx tekshirish funksiyasi
 async function getRealAvtoelonPrice(model, year) {
     try {
         let mName = model.toLowerCase().trim();
@@ -52,7 +62,7 @@ async function getRealAvtoelonPrice(model, year) {
         else if (mName.includes('damas')) queryModel = 'chevrolet/damas';
         else if (mName.includes('lacetti')) queryModel = 'chevrolet/lacetti';
 
-        if (!queryModel) return null; // O'zbekiston moshinalari bo'lmasa to'xtaydi
+        if (!queryModel) return null;
 
         const url = `https://avtoelon.uz/uz/avto/${queryModel}/year-${year}/`;
         const response = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
@@ -69,7 +79,7 @@ async function getRealAvtoelonPrice(model, year) {
             return Math.round(prices.reduce((a, b) => a + b, 0) / prices.length);
         }
     } catch (error) { 
-        console.error("Avtoelon parsing xatosi:", error.message); 
+        console.error("Avtoelon tahlil xatosi:", error.message); 
     }
     return null; 
 }
@@ -97,7 +107,7 @@ function calculateBackupPrice(model, year, condition) {
     return Math.round(price > 1000 ? price : 1100);
 }
 
-app.get('/', (req, res) => res.send('Bot 24/7 muvaffaqiyatli ishlamoqda!'));
+app.get('/', (req, res) => res.send('Bot 24/7 Muzaffaqiyatli va Uzluksiz ishlamoqda!'));
 
 const mainMenu = {
     reply_markup: {
@@ -181,99 +191,103 @@ bot.hears("📦 Mening e'lonlarim", async (ctx) => {
 });
 
 bot.on('message', async (ctx, next) => {
-    const userId = ctx.from.id;
-    const state = userStates[userId];
+    try {
+        const userId = ctx.from.id;
+        const state = userStates[userId];
 
-    if (!state || state.step === 'IDLE') return next();
+        if (!state || state.step === 'IDLE') return next();
 
-    if (state.step === 'WAITING_MODEL') {
-        if (!ctx.message.text) return ctx.reply('Iltimos, modelni matnda yozing:');
-        setUserState(userId, 'WAITING_YEAR', { model: ctx.message.text });
-        return ctx.reply('📅 Ishlab chiqarilgan yilini kiriting:');
-    }
+        if (state.step === 'WAITING_MODEL') {
+            if (!ctx.message.text) return ctx.reply('Iltimos, modelni matnda yozing:');
+            setUserState(userId, 'WAITING_YEAR', { model: ctx.message.text });
+            return ctx.reply('📅 Ishlab chiqarilgan yilini kiriting:');
+        }
 
-    if (state.step === 'WAITING_YEAR') {
-        if (!ctx.message.text || isNaN(ctx.message.text)) return ctx.reply('Iltimos, yilni faqat raqamda kiriting:');
-        setUserState(userId, 'WAITING_MILEAGE', { year: ctx.message.text });
-        return ctx.reply('🛣 Mashina qancha masofa yurgan? (KM da, faqat raqam):');
-    }
+        if (state.step === 'WAITING_YEAR') {
+            if (!ctx.message.text || isNaN(ctx.message.text)) return ctx.reply('Iltimos, yilni faqat raqamda kiriting:');
+            setUserState(userId, 'WAITING_MILEAGE', { year: ctx.message.text });
+            return ctx.reply('🛣 Mashina qancha masofa yurgan? (KM da, faqat raqam):');
+        }
 
-    if (state.step === 'WAITING_MILEAGE') {
-        if (!ctx.message.text || isNaN(ctx.message.text)) return ctx.reply('Iltimos, masofani faqat raqamda kiriting:');
-        setUserState(userId, 'WAITING_CONDITION', { mileage: ctx.message.text });
-        return ctx.reply('🛠 Mashina holatini tanlang:', {
-            reply_markup: {
-                inline_keyboard: [
-                    [{ text: "✨ Toza (Kraska yo'q)", callback_data: "cond_toza" }],
-                    [{ text: "🎨 Petno/Kraska bor", callback_data: "cond_kraska" }],
-                    [{ text: "💥 Urilgan / Yorilgan", callback_data: "cond_yorilgan" }]
-                ]
+        if (state.step === 'WAITING_MILEAGE') {
+            if (!ctx.message.text || isNaN(ctx.message.text)) return ctx.reply('Iltimos, masofani faqat raqamda kiriting:');
+            setUserState(userId, 'WAITING_CONDITION', { mileage: ctx.message.text });
+            return ctx.reply('🛠 Mashina holatini tanlang:', {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: "✨ Toza (Kraska yo'q)", callback_data: "cond_toza" }],
+                        [{ text: "🎨 Petno/Kraska bor", callback_data: "cond_kraska" }],
+                        [{ text: "💥 Urilgan / Yorilgan", callback_data: "cond_yorilgan" }]
+                    ]
+                }
+            });
+        }
+
+        if (state.step === 'WAITING_PRICE') {
+            if (!ctx.message.text) return ctx.reply('Iltimos, narxni yozing:');
+            setUserState(userId, 'WAITING_PHONE', { price: ctx.message.text });
+            return ctx.reply('📞 Telefon raqamingizni kiriting yoki pastdagi tugmani bosing:\nMasalan: 991234567', { 
+                reply_markup: { keyboard: [[{ text: "📱 Raqamni yuborish", request_contact: true }]], one_time_keyboard: true, resize_keyboard: true } 
+            });
+        }
+
+        if (state.step === 'WAITING_PHONE') {
+            let phone = ctx.message.contact ? ctx.message.contact.phone_number : ctx.message.text;
+            if (!phone) return ctx.reply('⚠️ Iltimos, telefon raqamingizni yozing yoki tugmani bosing:');
+
+            let cleanPhone = phone.toString().replace(/\s+/g, '');
+            const phoneRegex = /^(\+?\d{9,13})$/;
+
+            if (!phoneRegex.test(cleanPhone)) {
+                return ctx.reply('⚠️ Noto\'g\'ri format. Iltimos, raqamni to\'g\'ri kiriting:\nMasalan: 991234567');
             }
-        });
-    }
-
-    if (state.step === 'WAITING_PRICE') {
-        if (!ctx.message.text) return ctx.reply('Iltimos, narxni yozing:');
-        setUserState(userId, 'WAITING_PHONE', { price: ctx.message.text });
-        return ctx.reply('📞 Telefon raqamingizni kiriting yoki pastdagi tugmani bosing:\nMasalan: 991234567', { 
-            reply_markup: { keyboard: [[{ text: "📱 Raqamni yuborish", request_contact: true }]], one_time_keyboard: true, resize_keyboard: true } 
-        });
-    }
-
-    if (state.step === 'WAITING_PHONE') {
-        let phone = ctx.message.contact ? ctx.message.contact.phone_number : ctx.message.text;
-        if (!phone) return ctx.reply('⚠️ Iltimos, telefon raqamingizni yozing yoki tugmani bosing:');
-
-        let cleanPhone = phone.toString().replace(/\s+/g, '');
-        const phoneRegex = /^(\+?\d{9,13})$/;
-
-        if (!phoneRegex.test(cleanPhone)) {
-            return ctx.reply('⚠️ Noto\'g\'ri format. Iltimos, raqamni to\'g\'ri kiriting:\nMasalan: 991234567');
-        }
-        
-        setUserState(userId, 'WAITING_PHOTO', { phone: cleanPhone });
-        return ctx.reply('🖼 Endi mashinangizning rasmini yuboring:', { reply_markup: { remove_keyboard: true } });
-    }
-
-    if (state.step === 'WAITING_PHOTO') {
-        if (!ctx.message.photo) return ctx.reply('Iltimos, mashina rasmini fayl emas, rasm shaklida yuboring:');
-        const photoId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-        
-        const d = state.data;
-        adCounter++;
-        const elonNo = adCounter;
-        
-        let captionText = `📣 **E'LON №${elonNo}**\n\n🚗 #SOTILADI\n\n🚙 Modeli: ${d.model || 'Noma\'lum'}\n📅 Yili: ${d.year || ''}-yil\n🛣 Yurgani: ${d.mileage || 0} KM\n🛠 Holati: ${d.condition_text || ''}\n📍 Hudud: #__${(d.region || 'Toshkent').replace(' ', '_')}__\n💰 Narxi: **${d.price} $**\n`;
-        if (d.suggested_price && d.suggested_price !== "Noaniq") captionText += `📊 Bozor narxi (Tavsiya): ${d.suggested_price}\n`;
-        captionText += `📞 Tel: ${d.phone || ''}`;
-        
-        try {
-            const channelMsg = await ctx.telegram.sendPhoto(KANAL_ID, photoId, { caption: captionText });
             
-            globalAds.push({
-                userId: userId,
-                elonNo: elonNo,
-                model: d.model,
-                price: d.price,
-                photoId: photoId,
-                channelMsgId: channelMsg.message_id,
-                caption: captionText,
-                status: 'active'
-            });
-
-            const cleanChannelUsername = KANAL_ID.replace('@', '');
-            const postUrl = `https://t.me/${cleanChannelUsername}/${channelMsg.message_id}`;
-
-            ctx.reply(`✅ E'loningiz kanalga muvaffaqiyatli joylashtirildi!\n\n🔗 [Kanalda e'lon joylandi](${postUrl})`, { 
-                parse_mode: 'Markdown',
-                ...mainMenu 
-            });
-            
-            clearUserState(userId);
-        } catch (err) {
-            ctx.reply('Xatolik: Bot e\'lonni kanalga chiqara olmadi. Bot kanalda admin ekanligini tekshiring.', mainMenu);
-            clearUserState(userId);
+            setUserState(userId, 'WAITING_PHOTO', { phone: cleanPhone });
+            return ctx.reply('🖼 Endi mashinangizning rasmini yuboring:', { reply_markup: { remove_keyboard: true } });
         }
+
+        if (state.step === 'WAITING_PHOTO') {
+            if (!ctx.message.photo) return ctx.reply('Iltimos, mashina rasmini fayl emas, rasm shaklida yuboring:');
+            const photoId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+            
+            const d = state.data;
+            adCounter++;
+            const elonNo = adCounter;
+            
+            let captionText = `📣 **E'LON №${elonNo}**\n\n🚗 #SOTILADI\n\n🚙 Modeli: ${d.model || 'Noma\'lum'}\n📅 Yili: ${d.year || ''}-yil\n🛣 Yurgani: ${d.mileage || 0} KM\n🛠 Holati: ${d.condition_text || ''}\n📍 Hudud: #__${(d.region || 'Toshkent').replace(' ', '_')}__\n💰 Narxi: **${d.price} $**\n`;
+            if (d.suggested_price && d.suggested_price !== "Noaniq") captionText += `📊 Bozor narxi (Tavsiya): ${d.suggested_price}\n`;
+            captionText += `📞 Tel: ${d.phone || ''}`;
+            
+            try {
+                const channelMsg = await ctx.telegram.sendPhoto(KANAL_ID, photoId, { caption: captionText });
+                
+                globalAds.push({
+                    userId: userId,
+                    elonNo: elonNo,
+                    model: d.model,
+                    price: d.price,
+                    photoId: photoId,
+                    channelMsgId: channelMsg.message_id,
+                    caption: captionText,
+                    status: 'active'
+                });
+
+                const cleanChannelUsername = KANAL_ID.replace('@', '');
+                const postUrl = `https://t.me/${cleanChannelUsername}/${channelMsg.message_id}`;
+
+                ctx.reply(`✅ E'loningiz kanalga muvaffaqiyatli joylashtirildi!\n\n🔗 [Kanalda e'lon joylandi](${postUrl})`, { 
+                    parse_mode: 'Markdown',
+                    ...mainMenu 
+                });
+                
+                clearUserState(userId);
+            } catch (err) {
+                ctx.reply('⚠️ Xatolik: Bot e\'lonni kanalga chiqara olmadi. Bot kanalda admin ekanligini hamda "Post Messages" ruxsati borligini tekshiring.', mainMenu);
+                clearUserState(userId);
+            }
+        }
+    } catch (e) {
+        console.error("Xabar qayta ishlashda xato:", e.message);
     }
 });
 
@@ -356,4 +370,3 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
     bot.launch().catch(err => console.error("Bot ishga tushmadi:", err.message));
 });
-    
