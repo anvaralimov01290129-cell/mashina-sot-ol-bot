@@ -14,6 +14,19 @@ app.get('/', (req, res) => res.send('Bot 24/7 ishlamoqda!'));
 // Tezkor xotiradan seanslar uchun foydalanamiz
 bot.use(session());
 
+// === ENGI MUHIM QISM: /start yoki /elon bosilganda eski jarayonni buzib chiqish ===
+bot.use(async (ctx, next) => {
+    if (ctx.message && ctx.message.text) {
+        const text = ctx.message.text;
+        if (text === '/start' || text === '/elon') {
+            if (ctx.scene && ctx.scene.current) {
+                await ctx.scene.leave(); // Agar foydalanuvchi e'lon ichida bo'lsa, uni chiqarib yuboradi
+            }
+        }
+    }
+    return next();
+});
+
 const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
     (ctx) => { 
         ctx.reply('🚗 Mashina modelini kiriting:'); 
