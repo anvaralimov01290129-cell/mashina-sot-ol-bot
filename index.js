@@ -14,19 +14,6 @@ app.get('/', (req, res) => res.send('Bot 24/7 ishlamoqda!'));
 // Tezkor xotiradan seanslar uchun foydalanamiz
 bot.use(session());
 
-// === ENGI MUHIM QISM: /start yoki /elon bosilganda eski jarayonni buzib chiqish ===
-bot.use(async (ctx, next) => {
-    if (ctx.message && ctx.message.text) {
-        const text = ctx.message.text;
-        if (text === '/start' || text === '/elon') {
-            if (ctx.scene && ctx.scene.current) {
-                await ctx.scene.leave(); // Agar foydalanuvchi e'lon ichida bo'lsa, uni chiqarib yuboradi
-            }
-        }
-    }
-    return next();
-});
-
 const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
     (ctx) => { 
         ctx.reply('🚗 Mashina modelini kiriting:'); 
@@ -72,9 +59,23 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
     }
 );
 
+// Stage yaratamiz
 const stage = new Scenes.Stage([carAdWizard]);
+
+// === ENGI TUZATILGAN QISM: Sahnaning o'z ichida /start yoki /elon bosilganda majburlab chiqarib yuborish ===
+stage.start(async (ctx) => {
+    await ctx.scene.leave();
+    return ctx.reply('Salom! E\'lon berish uchun /elon buyrug\'ini bosing.');
+});
+
+stage.command('elon', async (ctx) => {
+    await ctx.scene.leave();
+    return ctx.scene.enter('CAR_AD_WIZARD');
+});
+
 bot.use(stage.middleware());
 
+// Global buyruqlar (agar foydalanuvchi sahna tashqarisida bo'lsa)
 bot.command('elon', (ctx) => ctx.scene.enter('CAR_AD_WIZARD'));
 bot.start((ctx) => ctx.reply('Salom! E\'lon berish uchun /elon buyrug\'ini bosing.'));
 
@@ -89,3 +90,4 @@ app.listen(PORT, '0.0.0.0', () => {
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
+        
