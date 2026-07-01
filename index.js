@@ -40,7 +40,6 @@ async function getRealAvtoelonPrice(model, year) {
             .replace(/\s+/g, '-')
             .replace(/[^a-z0-9-]/g, '');
 
-        // Nexia turlarini to'g'ri ajratish va Avtoelon.uz URL manziliga moslash
         if (queryModel.includes('nexia-3') || queryModel.includes('nexia3')) {
             queryModel = 'chevrolet/nexia-3';
         } else if (queryModel.includes('nexia-1') || queryModel.includes('nexia1') || (queryModel.includes('nexia') && !queryModel.includes('3') && !queryModel.includes('2'))) {
@@ -136,6 +135,22 @@ function calculateBackupPrice(model, year, condition) {
 app.get('/', (req, res) => res.send('Bot 24/7 ishlamoqda!'));
 bot.use(session());
 
+// === HUDUDLAR RO'YXATI ===
+const regionsKeyboard = {
+    reply_markup: {
+        inline_keyboard: [
+            [{ text: "🏙 Toshkent sh.", callback_data: "reg_Toshkent sh." }, { text: "🏔 Toshkent vil.", callback_data: "reg_Toshkent vil." }],
+            [{ text: "🍇 Andijon", callback_data: "reg_Andijon" }, { text: "🕌 Buxoro", callback_data: "reg_Buxoro" }],
+            [{ text: "☀️ Jizzax", callback_data: "reg_Jizzax" }, { text: "🍉 Xorazm", callback_data: "reg_Xorazm" }],
+            [{ text: "🏭 Namangan", callback_data: "reg_Namangan" }, { text: "🏛 Navoiy", callback_data: "reg_Navoiy" }],
+            [{ text: "🏺 Samarqand", callback_data: "reg_Samarqand" }, { text: "🏜 Sirdaryo", callback_data: "reg_Sirdaryo" }],
+            [{ text: "🌴 Surxondaryo", callback_data: "reg_Surxondaryo" }, { text: "🦅 Farg'ona", callback_data: "reg_Farg'ona" }],
+            [{ text: "🤠 Qashqadaryo", callback_data: "reg_Qashqadaryo" }, { text: "✨ Shahrisabz sh.", callback_data: "reg_Shahrisabz sh." }],
+            [{ text: "⛺️ Qoraqalpog'iston", callback_data: "reg_Qoraqalpog'iston" }]
+        ]
+    }
+};
+
 // === E'LON BERISH BOSQIChLARI (WIZARD SCENE) ===
 const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
     // 1. Model so'rash
@@ -174,7 +189,7 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
         });
         return ctx.wizard.next();
     },
-    // 5. Avtoelon tahlilini ko'rsatish va Sotuvchidan o'z narxini so'rash
+    // 5. Qaysi viloyatdan ekanligini so'rash (YANGI QO'ShILGAN BOSQICh)
     async (ctx) => {
         if (!ctx.callbackQuery) return ctx.reply('Iltimos, yuqoridagi tugmalardan birini tanlang:');
         await ctx.answerCbQuery();
@@ -187,6 +202,21 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
         
         ctx.wizard.state.data.condition_text = statusText;
         ctx.wizard.state.data.condition_val = condValue;
+
+        // Viloyatni so'raymiz
+        await ctx.reply('📍 Qaysi hududdan / viloyatdansiz? Tanlang:', regionsKeyboard);
+        return ctx.wizard.next();
+    },
+    // 6. Avtoelon tahlilini ko'rsatish va Sotuvchidan o'z narxini so'rash
+    async (ctx) => {
+        if (!ctx.callbackQuery || !ctx.callbackQuery.data.startsWith('reg_')) {
+            return ctx.reply('Iltimos, hududlardan birini tugma orqali tanlang:');
+        }
+        await ctx.answerCbQuery();
+        
+        // Tanlangan viloyatni saqlaymiz
+        const selectedRegion = ctx.callbackQuery.data.replace('reg_', '');
+        ctx.wizard.state.data.region = selectedRegion;
 
         await ctx.reply('⏳ Avtoelon.uz bazasidan joriy bozor narxi tahlil qilinmoqda...');
 
@@ -203,7 +233,6 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
             realPrice -= Math.floor(km / 50000) * 150;
         }
 
-        // Agar onlayn tizim eski Nexia 1 uchun baribir qimmat narx qaytarsa, uni jilovlaymiz
         if ((d.model.toLowerCase().includes('nexia 1') || d.model.toLowerCase() === 'nexia') && parseInt(d.year) < 2000 && realPrice > 2000) {
             realPrice = calculateBackupPrice(d.model, d.year, d.condition_val);
         }
@@ -213,7 +242,7 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
         await ctx.reply(`📊 Avtoelon.uz tahliliga ko'ra, moshinangizning o'rtacha bozor narxi: **${realPrice} $**\n\n💰 Siz moshinangizni necha pulga sotmoqchisiz?\n(Faqat raqam kiriting, masalan: 1350 yoki 12500)`);
         return ctx.wizard.next();
     },
-    // 6. Sotuvchi kiritgan narxni qabul qilish va Tel raqam so'rash
+    // 7. Sotuvchi kiritgan narxni qabul qilish va Tel raqam so'rash
     (ctx) => {
         if (!ctx.message || !ctx.message.text || isNaN(ctx.message.text)) {
             return ctx.reply('Iltimos, narxni faqat raqamlarda kiriting (Masalan: 4500):');
@@ -225,7 +254,7 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
         }); 
         return ctx.wizard.next();
     },
-    // 7. Rasm so'rash
+    // 8. Rasm so'rash
     async (ctx) => {
         const phone = ctx.message.contact ? ctx.message.contact.phone_number : (ctx.message ? ctx.message.text : null);
         if (!phone) return ctx.reply('Iltimos, raqamni yuboring:');
@@ -233,7 +262,7 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
         ctx.reply('🖼 Mashina rasmini yuboring:', { reply_markup: { remove_keyboard: true } });
         return ctx.wizard.next();
     },
-    // 8. Kanalga chiqarish
+    // 9. Kanalga chiqarish
     async (ctx) => {
         if (!ctx.message || !ctx.message.photo) return ctx.reply('Iltimos, mashina rasmini yuboring:');
         const photoId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
@@ -242,9 +271,9 @@ const carAdWizard = new Scenes.WizardScene('CAR_AD_WIZARD',
         
         try {
             await ctx.telegram.sendPhoto(KANAL_ID, photoId, { 
-                caption: `📣 **E'LON №${elonNo}**\n\n🚗 #SOTILADI\n\n🚙 Modeli: ${d.model}\n📅 Yili: ${d.year}-yil\n🛣 Yurgani: ${d.mileage} KM\n🛠 Holati: ${d.condition_text}\n💰 Narxi: **${d.price} $**\n📊 Bozor narxi (Tavsiya): ${d.suggested_price} $\n📞 Tel: ${d.phone}` 
+                caption: `📣 **E'LON №${elonNo}**\n\n🚗 #SOTILADI\n\n🚙 Modeli: ${d.model}\n📅 Yili: ${d.year}-yil\n🛣 Yurgani: ${d.mileage} KM\n🛠 Holati: ${d.condition_text}\n📍 Hudud: #__${d.region.replace(' ', '_')}__\n💰 Narxi: **${d.price} $**\n📊 Bozor narxi (Tavsiya): ${d.suggested_price} $\n📞 Tel: ${d.phone}` 
             });
-            ctx.reply(`✅ E'loningiz siz ko'rsatgan narxda kanalga joylashtirildi! (E'lon №${elonNo})`);
+            ctx.reply(`✅ E'loningiz ${d.region} hududi bo'yicha kanalga joylashtirildi! (E'lon №${elonNo})`);
         } catch (err) {
             ctx.reply('Xatolik: Bot e\'lonni kanalga chiqara olmadi.');
         }
@@ -268,4 +297,4 @@ app.listen(PORT, '0.0.0.0', () => {
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-    
+                
